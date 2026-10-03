@@ -17,26 +17,26 @@ Notation is fixed course-wide in [NOTATION.md](NOTATION.md). It follows Sutton &
 | **Part I** | **Foundations and tabular methods** | |
 | 01 | [The RL Problem and Markov Decision Processes](chapters/01-the-rl-problem.md) | Formalize a problem as an MDP; derive and solve the Bellman equations |
 | 02 | [Multi-Armed Bandits](chapters/02-multi-armed-bandits.md) | Trade off exploration and exploitation with ε-greedy, UCB and Thompson sampling, and reason about regret |
-| 03 | [Dynamic Programming](chapters/03-dynamic-programming.md) | Plan optimally with a known model; prove why it works (contractions, policy improvement) |
+| 03 | [Dynamic Programming](chapters/03-dynamic-programming.md) | Plan optimally with a known model; prove why it works (contractions, policy improvement); extend it to continuous control with LQR and iLQR |
 | 04 | [Monte Carlo Methods](chapters/04-monte-carlo.md) | Learn from complete episodes; evaluate one policy from another's data with importance sampling |
-| 05 | [Temporal-Difference Learning](chapters/05-temporal-difference.md) | Use TD(0), SARSA, Q-learning, Expected SARSA and Double Q-learning |
+| 05 | [Temporal-Difference Learning](chapters/05-temporal-difference.md) | Use TD(0), SARSA, Q-learning, Expected SARSA and Double Q-learning; connect TD errors to dopamine and animal learning |
 | 06 | [n-Step Bootstrapping and Eligibility Traces](chapters/06-n-step-and-eligibility-traces.md) | Move along the spectrum between MC and TD with n-step returns, λ-returns and traces |
 | 07 | [Planning and Learning with Tabular Models](chapters/07-planning-and-learning-tabular.md) | Combine learning and planning with Dyna and prioritized sweeping; search with MCTS |
-| 08 | [Value Function Approximation](chapters/08-function-approximation.md) | Generalize with linear features and tile coding; understand the deadly triad |
+| 08 | [Value Function Approximation](chapters/08-function-approximation.md) | Generalize with linear features and tile coding; run batch methods (LSTD, fitted Q-iteration, LSPI); understand the deadly triad |
 | **Part II** | **Deep reinforcement learning** | |
 | 09 | [Deep Q-Networks and Value-Based Deep RL](chapters/09-deep-q-learning.md) | Build DQN, Double, Dueling and distributional variants and know why each was introduced |
-| 10 | [Policy Gradient Methods](chapters/10-policy-gradients.md) | Derive the policy gradient theorem; implement REINFORCE, actor-critic and GAE |
+| 10 | [Policy Gradient Methods](chapters/10-policy-gradients.md) | Derive the policy gradient theorem; implement REINFORCE, actor-critic and GAE; compare with evolution strategies and random search |
 | 11 | [Natural Gradients, Trust Regions, TRPO and PPO](chapters/11-trust-regions-and-ppo.md) | Implement PPO and know which implementation details matter |
-| 12 | [Off-Policy Actor-Critic: DDPG, TD3, SAC](chapters/12-continuous-control-actor-critic.md) | Solve continuous control with deterministic and maximum-entropy actor-critics |
+| 12 | [Off-Policy Actor-Critic: DDPG, TD3, SAC](chapters/12-continuous-control-actor-critic.md) | Solve continuous control with deterministic and maximum-entropy actor-critics; see RL as inference (REPS, MPO) |
 | 13 | [Model-Based Deep RL, World Models, AlphaZero/MuZero](chapters/13-model-based-rl.md) | Learn and plan with models: PETS, MBPO, Dreamer, AlphaZero, MuZero |
 | **Part III** | **Advanced topics** | |
 | 14 | [Exploration](chapters/14-exploration.md) | Explore deeply with optimism, posterior sampling, counts, curiosity and RND |
-| 15 | [Beyond the Standard MDP](chapters/15-beyond-mdps.md) | Handle partial observability, goals (HER), hierarchy (options) and meta-RL |
-| 16 | [Imitation Learning, Inverse RL and Offline RL](chapters/16-offline-rl-and-imitation.md) | Learn from demonstrations and fixed datasets: BC, DAgger, GAIL, CQL, IQL and off-policy evaluation |
+| 15 | [Beyond the Standard MDP](chapters/15-beyond-mdps.md) | Handle partial observability, goals (HER), hierarchy (options), meta-RL, multiple objectives, and generalization to unseen environments |
+| 16 | [Imitation Learning, Inverse RL and Offline RL](chapters/16-offline-rl-and-imitation.md) | Learn from demonstrations and fixed datasets: BC, DAgger, GAIL, CQL, IQL, diffusion policies and off-policy evaluation |
 | 17 | [Multi-Agent RL and Games](chapters/17-multi-agent-rl.md) | Reason about equilibria; use self-play, CTDE, QMIX and CFR |
-| 18 | [RL for Language Models](chapters/18-rl-for-language-models.md) | Understand and implement RLHF, DPO, GRPO and RL with verifiable rewards |
+| 18 | [RL for Language Models](chapters/18-rl-for-language-models.md) | Understand and implement RLHF, DPO, GRPO, expert iteration, RL with verifiable rewards and multi-turn agentic RL |
 | 19 | [Theory of RL](chapters/19-rl-theory.md) | Read and state convergence, sample-complexity and regret results precisely |
-| 20 | [Deep RL in Practice](chapters/20-deep-rl-in-practice.md) | Design rewards, debug agents, evaluate with statistical rigor, and handle safety constraints |
+| 20 | [Deep RL in Practice](chapters/20-deep-rl-in-practice.md) | Design rewards, debug agents, evaluate with statistical rigor, and handle safety constraints and robustness |
 
 Reference material: [NOTATION.md](NOTATION.md) (symbols), [GLOSSARY.md](GLOSSARY.md) (terms), [CHEATSHEET.md](CHEATSHEET.md) (algorithms at a glance) and [READING_LIST.md](READING_LIST.md) (books, courses, papers).
 
@@ -54,14 +54,15 @@ Chapter 00 is a reference. Skim it first, then come back to sections as later ch
 
 ```bash
 python -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt            # CPU-only is fine; no GPU, MuJoCo or Atari needed
+pip install torch --index-url https://download.pytorch.org/whl/cpu   # optional: much smaller CPU-only PyTorch
+pip install -r requirements.txt            # no GPU, MuJoCo or Atari needed
 
-python code/ch05_temporal_difference/<script>.py           # full run: reproduces the chapter's numbers and figures
-python code/ch05_temporal_difference/<script>.py --quick   # ~30 s smoke test, writes no figures
+python code/ch05_temporal_difference/cliff_walking.py           # full run: reproduces the chapter's numbers and figures
+python code/ch05_temporal_difference/cliff_walking.py --quick   # smoke test (seconds), writes no figures
 pytest tests/                              # runs every script in --quick mode
 ```
 
-Each `code/chNN_*/README.md` lists that chapter's scripts, what they show, their runtimes and their headline results. Full runs take seconds to a few minutes on one CPU core.
+Each `code/chNN_*/README.md` lists that chapter's scripts, what they show, their runtimes and their headline results. Most full runs take seconds to a few minutes on one CPU core; the heaviest deep-RL experiments take up to about ten minutes.
 
 ## How to study with this course
 

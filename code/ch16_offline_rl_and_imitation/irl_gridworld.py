@@ -221,6 +221,17 @@ def main():
           + ", ".join(f"{f} {m:.2f}" for f, m in zip(FEATURES, mu_E)))
     print(f"exact soft-expert feature expectations:          "
           + ", ".join(f"{f} {m:.2f}" for f, m in zip(FEATURES, train.feature_expectations(expert_soft))))
+    # Is mu_E achievable at all?  The range of each feature count over ALL policies is found by
+    # planning optimally for the reward +phi_j (max) and -phi_j (min).  With stochastic moves the
+    # empirical mu_E of a finite sample can lie OUTSIDE the achievable set (Section 4.4): then no
+    # reward matches the features and the MaxEnt dual (16.16) is unbounded.
+    print("achievable range of each feature count over all policies (optimal for +-phi_j):")
+    for j, f in enumerate(FEATURES):
+        e = np.eye(len(FEATURES))[j]
+        hi = train.feature_expectations(train.optimal_policy(train.phi @ e))[j]
+        lo = train.feature_expectations(train.optimal_policy(-train.phi @ e))[j]
+        flag = "  <-- OUTSIDE the achievable range" if not (lo - 1e-9 <= mu_E[j] <= hi + 1e-9) else ""
+        print(f"  {f:5s}: [{lo:.3f}, {hi:.3f}]   expert (empirical) {mu_E[j]:.3f}{flag}")
 
     # --- learners -------------------------------------------------------------------------
     pi_bc, seen = behaviour_cloning(train, demos)
@@ -237,9 +248,13 @@ def main():
               f"final = {np.round(th, 2).tolist()}, final |mu_E - mu_omega| = {hi[-1][1]:.4f}")
     print(f"  differences to road (grass, mud, goal): true {np.round(OMEGA_TRUE[1:] - OMEGA_TRUE[0], 2).tolist()}, "
           f"MAP {np.round(omega_me[1:] - omega_me[0], 2).tolist()}")
+    mu_ml = train.feature_expectations(train.soft_policy(train.phi @ omega_ml))
+    print(f"  max. likelihood end point: mu_omega = {np.round(mu_ml, 3).tolist()}, "
+          f"residual mu_E - mu_omega = {np.round(mu_E - mu_ml, 3).tolist()}")
+    mu_bar = sum(l * train.feature_expectations(p) for l, p in zip(lam, proj_pols))
     print(f"projection method: |mu_E - mu_bar| over iterations: "
           f"{dist[0]:.3f} -> {dist[min(5, len(dist) - 1)]:.3f} (it. 5) -> {dist[-1]:.4f} (it. {proj_iters}); "
-          f"last w = {np.round(w_proj, 3).tolist()}")
+          f"mu_bar = {np.round(mu_bar, 3).tolist()}; last w = {np.round(w_proj, 3).tolist()}")
 
     # --- evaluation in the training world and in the transfer world ------------------------
     rows = []

@@ -219,6 +219,8 @@ METHODS = {
     "GRPO+PRM":  dict(adv="process", norm="seq_mean", clip=(0.2, 0.2), beta=0.04, dyn=False),
 }
 ABLATIONS = {"GRPO, beta=0", "Dr. GRPO, beta=0.04"}  # drawn dashed in the figure
+MAX_REFILLS = 20  # dynamic sampling: cap on refill rounds per update.  Each round leaves a missing
+#                   slot unfilled with probability f (the no-signal fraction), so 20 rounds suffice
 
 
 def aggregate(per_token, mask, norm, G):
@@ -271,27 +273,35 @@ def run_rl(name, base, iters, g, cfg, eval_set, log_every=0):
         p.requires_grad_(True)
     opt = torch.optim.Adam(policy.parameters(), lr=cfg["lr"])
     G, P = cfg["G"], cfg["prompts_per_batch"]
-    curve, n_samples, degen_hist = [], 0, []
+    curve, n_samples, degen_hist, samp_hist = [], 0, [], []
     for it in range(iters):
         # ---- rollouts: G responses per prompt, scored by the verifier ----
         batch = sample_groups(policy, P, G, g)
-        n_samples += len(batch["r"])
+        n_drawn = len(batch["r"])
         frac_degenerate = 1.0 - len(mixed_groups(batch, G)) / P  # all-correct or all-wrong groups
         degen_hist.append(frac_degenerate)
         if knobs["dyn"]:
             # DAPO's dynamic sampling: keep only groups whose rewards are not all equal (the
             # others have zero advantage and contribute no gradient), and sample more prompts
-            # until the batch is full again (at most 4 extra rounds here).
+            # until the batch is full again.  Each refill draws exactly as many fresh prompts as
+            # groups are still missing, so nothing is drawn and then thrown away: the expected
+            # cost is P*G / (1 - f) responses per update when a fraction f of groups has no
+            # signal (Exercise 7).  At most MAX_REFILLS rounds; if the batch is still short we
+            # train on the groups we have.
             batch = take_groups(batch, mixed_groups(batch, G), G)
-            for _ in range(4):
-                if len(batch["r"]) >= P * G:
+            for _ in range(MAX_REFILLS):
+                missing = P - len(batch["r"]) // G
+                if missing <= 0:
                     break
-                extra = sample_groups(policy, P, G, g)
-                n_samples += len(extra["r"])
-                batch = cat_batches(batch, take_groups(extra, mixed_groups(extra, G), G))
-            if len(batch["r"]) == 0:
-                continue
-            batch = take_groups(batch, range(min(P, len(batch["r"]) // G)), G)
+                extra = sample_groups(policy, missing, G, g)
+                n_drawn += len(extra["r"])
+                keep = mixed_groups(extra, G)
+                if keep:
+                    batch = cat_batches(batch, take_groups(extra, keep, G))
+        n_samples += n_drawn
+        samp_hist.append(n_drawn)
+        if len(batch["r"]) == 0:
+            continue
         c, y, m, r, step_ok = batch["c"], batch["y"], batch["m"], batch["r"], batch["step_ok"]
         rt = torch.as_tensor(r, dtype=torch.float)
         with torch.no_grad():
@@ -335,7 +345,9 @@ def run_rl(name, base, iters, g, cfg, eval_set, log_every=0):
         if it % cfg["eval_every"] == 0 or it == iters - 1:
             ev = evaluate(policy, base, eval_set, g)
             # fraction of no-signal groups, averaged over the iterations since the last evaluation
-            ev.update(it=it, samples=n_samples, degenerate=float(np.mean(degen_hist[-cfg["eval_every"]:])))
+            # and responses drawn per update over the same window (P*G except under dynamic sampling)
+            ev.update(it=it, samples=n_samples, degenerate=float(np.mean(degen_hist[-cfg["eval_every"]:])),
+                      per_update=float(np.mean(samp_hist[-cfg["eval_every"]:])))
             curve.append(ev)
             if log_every and (it % log_every == 0 or it == iters - 1):
                 print(f"    {name:<19} it {it:4d}  acc {ev['acc']:.3f}  greedy {ev['greedy']:.3f}  "
@@ -423,7 +435,7 @@ def main():
                iters=8 if quick else 200, eval_every=4 if quick else 20,
                n_eval_per_size=20 if quick else 100, tts_samples=16 if quick else 64,
                seeds=1 if quick else 3)
-    methods = ["GRPO", "Dr. GRPO"] if quick else list(METHODS)
+    methods = ["GRPO", "Dr. GRPO", "DAPO-lite"] if quick else list(METHODS)
     print(f"seed={args.seed} quick={quick}")
     print("config:", cfg)
     print("methods:", {k: METHODS[k] for k in methods})
@@ -503,6 +515,14 @@ def main():
     print(f"  accuracy at about {budget} sampled responses: "
           + ", ".join(f"{m} {np.mean([np.interp(budget, [e['samples'] for e in c], [e['acc'] for e in c]) for c in curves[m]]):.3f}"
                       for m in methods))
+    for m in methods:
+        if METHODS[m]["dyn"]:  # sampling cost of dynamic sampling, early vs late (Exercise 7)
+            pu = np.array([[e["per_update"] for e in c] for c in curves[m]]).mean(0)
+            dg = np.array([[e["degenerate"] for e in c] for c in curves[m]]).mean(0)
+            print(f"  {m}: responses drawn per update {pu[1]:.0f} (iterations 1-{cfg['eval_every']}, no-signal {dg[1]:.2f}) -> "
+                  f"{pu[-1]:.0f} (last {cfg['eval_every']}, no-signal {dg[-1]:.2f}); mean over the run "
+                  f"{np.mean([c[-1]['samples'] for c in curves[m]]) / cfg['iters']:.0f} "
+                  f"vs {cfg['G'] * cfg['prompts_per_batch']} without filtering")
     print(f"\nTotal time {time.time() - t_start:.1f}s")
     if quick:
         return

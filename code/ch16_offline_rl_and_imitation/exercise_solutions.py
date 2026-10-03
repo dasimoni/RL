@@ -6,7 +6,8 @@
   Exercise 16.9   expectiles of a two-point distribution: closed form vs numerical minimiser.
   Exercise 16.10  the KL-regularised improvement step has solution pi* ~ pi_beta exp(beta A).
   Exercise 16.13  tabular GAIL on the Section 4 gridworld (irl_gridworld.py), with exact
-                  occupancy measures and exact policy gradients.
+                  occupancy measures and exact policy gradients; a stable discriminator step
+                  (main run) and one that is too large (contrast run).
   Exercise 16.14  offline policy selection: pick the best of several candidate policies from
                   logged data using an OPE estimator (ope_tabular.py's MDP).
 
@@ -81,16 +82,23 @@ def soft_q(grid, pis, reward_sa, lam):
     return Q, V[:-1]
 
 
-def tabular_gail(grid, rho_E, iters, lam=0.1, lr_pi=0.5, lr_d=1.0, d_steps=5):
+def tabular_gail(grid, rho_E, iters, lam=0.1, lr_pi=0.5, lr_d=0.2, d_steps=5, track_state=None):
     """GAIL (Algorithm 16.5) with exact occupancy measures.  D(s,a) = P(expert | s, a) is a
     table of logits psi; the policy has time-dependent softmax logits theta[t, s, a].
       D step:  a few gradient-ascent steps on  sum rho_E log D + sum rho_pi log(1 - D)
       pi step: natural-gradient (soft policy iteration) step on E_pi[sum_t r] + lam H(pi),
-               reward r(s,a) = -log(1 - D(s,a)), i.e. theta += lr * (Q_soft - lam log pi - V)."""
+               reward r(s,a) = -log(1 - D(s,a)), i.e. theta += lr * (Q_soft - lam log pi - V).
+    Step size of the D step.  Per pair, d/dpsi = rho_E (1 - D) - rho_pi D, with fixed point
+    D* = rho_E / (rho_E + rho_pi) (Eq. 16.19).  Linearised, one step with step size
+    eta = lr_d * |S| multiplies the error by 1 - eta (rho_E + rho_pi) D*(1 - D*), so it is
+    stable only if  eta (rho_E + rho_pi) D*(1 - D*) < 2.  The absorbing goal has by far the
+    largest occupancy per (s, a) pair; with lr_d = 1 it violates this and D there flips
+    between high and low values from one iteration to the next.  lr_d = 0.2 is stable.
+    If track_state is given, D[track_state] is recorded at each of the last 3 iterations."""
     H, nA = IG.H, IG.NA
     theta = np.zeros((H, grid.ns, nA))
     psi = np.zeros((grid.ns, nA))
-    hist = []
+    hist, track = [], []
     rE = rho_E / rho_E.sum()
     for k in range(iters):
         pis = np.exp(theta - logsumexp(theta, axis=2, keepdims=True))
@@ -100,6 +108,8 @@ def tabular_gail(grid, rho_E, iters, lam=0.1, lr_pi=0.5, lr_d=1.0, d_steps=5):
             D = 1 / (1 + np.exp(-psi))
             psi += lr_d * (rE * (1 - D) - rp * D) * grid.ns   # gradient of the D objective
         D = 1 / (1 + np.exp(-psi))
+        if track_state is not None and k >= iters - 3:
+            track.append((k, D[track_state].copy()))
         reward = -np.log(1 - D + 1e-12)
         Q, V = soft_q(grid, pis, reward, lam)
         theta += lr_pi * (Q - lam * np.log(pis + 1e-300) - V[:, :, None])
@@ -109,7 +119,13 @@ def tabular_gail(grid, rho_E, iters, lam=0.1, lr_pi=0.5, lr_d=1.0, d_steps=5):
                 + 0.5 * np.sum(rp[rp > 0] * np.log(rp[rp > 0] / m[rp > 0]))
             hist.append((k, np.abs(rE - rp).sum(), js, grid.value(pis)))
     pis = np.exp(theta - logsumexp(theta, axis=2, keepdims=True))
-    return pis, 1 / (1 + np.exp(-psi)), hist
+    # largest linearised stability factor eta (rho_E + rho_pi) / 4 (uses D*(1-D*) <= 1/4),
+    # at the goal and over all other pairs, for the final policy
+    rp = occupancy(grid, pis); rp = rp / rp.sum()
+    fac = lr_d * grid.ns * (rE + rp) / 4
+    other = np.ones(grid.ns, bool); other[grid.goal] = False
+    stab = (fac[grid.goal].max(), fac[other].max())
+    return pis, 1 / (1 + np.exp(-psi)), hist, track, stab
 
 
 def gail_check(quick):
@@ -124,26 +140,50 @@ def gail_check(quick):
         for s, a in traj:
             rho_E[s, a] += 1.0 / len(demos)
     iters = 200 if quick else 3000
-    pis, D, hist = tabular_gail(train, rho_E, iters)
-    print(f"  iterations={iters}, entropy weight lam=0.1")
-    print(f"  {'iter':>5s} {'L1(rho_E, rho_pi)':>18s} {'JS':>8s} {'true return':>12s}")
-    for k, l1, js, v in hist:
-        print(f"  {k:5d} {l1:18.4f} {js:8.4f} {v:12.2f}")
     supp = rho_E > 0
-    print(f"  D(s,a) on the expert's support: mean {D[supp].mean():.3f}, min {D[supp].min():.3f}, "
-          f"max {D[supp].max():.3f}")
-    print(f"  soft expert's true return in the training world: {train.value(expert):.2f}")
-    # transfer: (i) replay the learned (state-indexed) policy; (ii) re-optimise the
-    # discriminator reward r = -log(1 - D) in the new world
-    r_d = -np.log(1 - D + 1e-12)
-    V = np.zeros(test.ns); pis_t = np.zeros((IG.H, test.ns, IG.NA))
-    for t in reversed(range(IG.H)):
-        Qd = r_d + test.P @ V
-        V = Qd.max(1)
-        pis_t[t] = np.eye(IG.NA)[Qd.argmax(1)]
-    print(f"  transfer world: GAIL policy replayed {test.value(pis):.2f}; optimal for the "
-          f"discriminator reward {test.value(pis_t):.2f}; true optimum "
-          f"{test.value(test.optimal_policy(test.phi @ IG.OMEGA_TRUE)):.2f}")
+    off_goal = supp.copy(); off_goal[train.goal] = False
+    goal_max = train.feature_expectations(train.optimal_policy(train.phi[:, 3]))[3]
+    print(f"  iterations={iters}, entropy weight lam=0.1, 5 D steps per policy step")
+    print(f"  expert's empirical goal visits {rho_E[train.goal].sum():.2f}; the most any policy "
+          f"can achieve is {goal_max:.3f} (Section 4.4)")
+    r_true_test = test.phi @ IG.OMEGA_TRUE
+    print(f"  soft expert's true return in the training world: {train.value(expert):.2f}; "
+          f"true optimum in the transfer world: {test.value(test.optimal_policy(r_true_test)):.2f}")
+    for lr_d, label in [(0.2, "stable D step (main run)"), (1.0, "D step too large (contrast)")]:
+        pis, D, hist, track, stab = tabular_gail(train, rho_E, iters, lr_d=lr_d, track_state=train.goal)
+        print(f"\n  lr_d = {lr_d}: {label}; stability factor eta(rho_E+rho_pi)/4 at the goal "
+              f"{stab[0]:.2f}, elsewhere at most {stab[1]:.2f} (stable if < 2)")
+        print(f"  {'iter':>5s} {'L1(rho_E, rho_pi)':>18s} {'JS':>8s} {'true return':>12s}")
+        for k, l1, js, v in hist:
+            print(f"  {k:5d} {l1:18.4f} {js:8.4f} {v:12.2f}")
+        print(f"  GAIL policy's goal visits {occupancy(train, pis)[train.goal].sum():.2f}")
+        print(f"  D(s,a) on the expert's support: mean {D[supp].mean():.3f}, min {D[supp].min():.3f}, "
+              f"max {D[supp].max():.3f}; at the goal {np.round(D[train.goal], 3).tolist()}; "
+              f"elsewhere on the support [{D[off_goal].min():.3f}, {D[off_goal].max():.3f}]")
+        print("  D at the goal over the last iterations: "
+              + "; ".join(f"it. {k}: {np.round(d, 3).tolist()}" for k, d in track))
+        # transfer: (i) replay the learned (state-indexed) policy; (ii) re-optimise the
+        # discriminator reward r = -log(1 - D) in the new world
+        r_d = -np.log(1 - D + 1e-12)
+        V = np.zeros(test.ns); pis_t = np.zeros((IG.H, test.ns, IG.NA))
+        for t in reversed(range(IG.H)):
+            Qd = r_d + test.P @ V
+            V = Qd.max(1)
+            pis_t[t] = np.eye(IG.NA)[Qd.argmax(1)]
+        mu_t = test.feature_expectations(pis_t)
+        print(f"  reward -log(1-D): mean on the expert's support {r_d[supp].mean():.3f}, "
+              f"at the goal {np.round(r_d[train.goal], 3).tolist()}")
+        print(f"  transfer world: GAIL policy replayed {test.value(pis):.2f}; optimal for the "
+              f"discriminator reward {test.value(pis_t):.2f} (expected visits road/grass/mud/goal "
+              f"{np.round(mu_t, 2).tolist()})")
+        # The discriminator is a table over grid cells, not terrain types: which cells does the
+        # re-planned policy use, and what reward did the discriminator leave there?
+        vis = test.visitation(pis_t).sum(0)
+        cells = [f"({s // test.w},{s % test.w}) {IG.FEATURES[train.terrain[s]]}->{IG.FEATURES[test.terrain[s]]}"
+                 f" r={r_d[s].max():.3f}{' [demo visits ' + format(rho_E[s].sum(), '.2f') + ']'}"
+                 for s in np.flatnonzero(vis > 0.01)]
+        print("  cells used by the re-planned policy (train->transfer terrain, max_a reward, demo visits):\n    "
+              + "\n    ".join(cells))
 
 
 # ---------------------------------------------------------------- Exercise 16.14

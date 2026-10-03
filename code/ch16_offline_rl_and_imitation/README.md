@@ -13,7 +13,7 @@ The tabular demos use NumPy and compute expected costs and values exactly, by pr
 | `cql_tabular.py` | The CQL lower-bound theorems checked in a table, exactly and with finite data (Section 8.5) | `python code/ch16_offline_rl_and_imitation/cql_tabular.py` | <1 s | 3–4 s |
 | `sequence_vs_dp.py` | Return-conditioned supervised learning (Decision-Transformer style) vs in-sample DP: stitching and luck (Section 11) | `python code/ch16_offline_rl_and_imitation/sequence_vs_dp.py` | <1 s | <1 s |
 | `ope_tabular.py` | Off-policy evaluation (Section 12): IS, WIS, PDIS, WPDIS, FQE, DR, WDR, plus FQE and DR with a misspecified model, vs data size, horizon and policy mismatch | `python code/ch16_offline_rl_and_imitation/ope_tabular.py` | <1 s | 58–61 s |
-| `exercise_solutions.py` | Numerical checks for Exercises 16.2, 16.9, 16.10, 16.13 (tabular GAIL) and 16.14 (offline policy selection) | `python code/ch16_offline_rl_and_imitation/exercise_solutions.py` | 1 s | 10–11 s |
+| `exercise_solutions.py` | Numerical checks for Exercises 16.2, 16.9, 16.10, 16.13 (tabular GAIL, with a stable and a too-large discriminator step) and 16.14 (offline policy selection) | `python code/ch16_offline_rl_and_imitation/exercise_solutions.py` | 2 s | 15–16 s |
 | `offline_lib.py` | Shared CartPole pieces: scripted expert (LQR) and medium policies, dataset collection, `EnsembleMLP` (one ensemble member per seed), lockstep evaluation | (imported) | | |
 | `plot_style.py` | Shared matplotlib style | (imported) | | |
 
@@ -30,7 +30,7 @@ Times are wall-clock seconds on a shared 4-CPU machine with one thread per scrip
 | training | 50.00 | 49.38 | 48.01 | 49.44 | 48.99 | −59.62 |
 | transfer | 56.67 | 55.85 | −42.16 | 43.33 | 55.93 | −52.69 |
 
-MAP MaxEnt (ℓ2 = 0.03) recovers reward differences to road of (−1.33, −3.69, +5.15) for grass, mud and goal (true: −2, −6, +3). Plain maximum likelihood does not converge, because grass is never visited in the demonstrations; stopped at 2,000 steps it still transfers as well (56.34). The projection method's gap ‖μ_E − μ̄‖ stalls at 0.154 from iteration 5 on, the same floor as unregularised MaxEnt.
+MAP MaxEnt (ℓ2 = 0.03) recovers reward differences to road of (−1.33, −3.69, +5.15) for grass, mud and goal (true: −2, −6, +3). Plain maximum likelihood does not converge, because the empirical μ_E lies outside the set of achievable feature expectations: the 30 demonstrations spent 16.80 steps at the goal, but no policy can average more than 16.667 (the script prints the achievable range of every feature; grass and mud are inside theirs). Stopped at 2,000 steps it still transfers as well (56.34). The projection method's gap ‖μ_E − μ̄‖ stalls at 0.154 from iteration 5 on, the same floor as unregularised MaxEnt. Both end at μ = (13.211, 0.044, 0.078, 16.667); the residual (−0.044, −0.044, −0.045, +0.133) is the unreachable goal excess.
 
 **`offline_cartpole.py`** (final greedy return, mean (sd) over 5 seeds):
 
@@ -55,4 +55,4 @@ Naive DQN's mean max-Q on dataset states reaches 1.5 × 10⁵ (expert) and 2.1 �
 | 100 | 5.52 | 0.66 | 2.19 | 0.39 | 0.19 | 0.44 | 0.63 | 0.73 | 0.39 |
 | 5000 | 1.18 | 0.24 | 0.31 | 0.11 | 0.02 | 0.41 | 0.12 | 0.12 | 0.11 |
 
-**`exercise_solutions.py`**: tabular GAIL reaches JS divergence 0.031 to the empirical expert occupancy (return 49.0 vs expert 49.4). Offline selection among 7 candidate policies: FQE picks the best one in 100% of 300 datasets, DR 76%, WDR 68%, WPDIS 1%, WIS 0%.
+**`exercise_solutions.py`**: tabular GAIL with a stable discriminator step (lr_d = 0.2) reaches JS divergence 0.0007 to the empirical expert occupancy (return 48.7 vs expert 49.4), with D at the goal 0.50–0.51 and 0.41–0.62 elsewhere on the expert's support; in the transfer world the replayed policy scores 17.43 and the re-optimised discriminator reward 50.00 (optimum 56.67; it crosses a mud cell no demonstration entered). With lr_d = 1 the discriminator update is unstable at the high-occupancy goal (linearised factor 5.89 > 2): D there flips between ≈0.01 and ≈0.94 from one iteration to the next, and JS stalls near 0.03. Offline selection among 7 candidate policies: FQE picks the best one in 100% of 300 datasets, DR 76%, WDR 68%, WPDIS 1%, WIS 0%.

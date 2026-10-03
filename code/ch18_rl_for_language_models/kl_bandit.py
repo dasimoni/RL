@@ -335,6 +335,28 @@ def main():
         i = int(np.flatnonzero(rows[:, 0] == n)[0])  # exact match: n is on the grid
         print(f"  n={int(rows[i, 0]):<5} bound={rows[i, 3]:.3f}  exact KL (K=8)={rows[i, 1]:.3f}  "
               f"exact KL (K=10^4 uniform)={rows[i, 2]:.3f}  E[r] BoN (K=8)={rows[i, 4]:.3f}")
+    # The sample-based estimator of the exact best-of-n KL used by rlhf_toy.py (Section 8.4):
+    # log pi_BoN(y)/pi_ref(y) = log(((F-(y) + pi_ref(y))^n - F-(y)^n) / pi_ref(y)) with pi_ref(y)
+    # exact and F-(y) = Pr{r(Y') < r(y)} estimated from a pool of reference samples, averaged over
+    # the winners of disjoint blocks of n samples from the same pool.  Pool size as in the toy
+    # (512 x 512 samples over 4 prompts = 65,536 per prompt); 20 independent pools.
+    n_chk, pool_size, n_pools = 64, 2048 if quick else 65536, 5 if quick else 20
+    est = []
+    for i in range(n_pools):
+        gp = np.random.default_rng(SEED + 100 + i)  # separate streams: nothing else changes
+        pool = gp.choice(K, size=pool_size, p=pi_ref)
+        rp = r[pool]
+        F_minus = np.searchsorted(np.sort(rp), rp, side="left") / pool_size  # strictly lower
+        blocks = pool.reshape(-1, n_chk)
+        win = blocks[np.arange(len(blocks)), r[blocks].argmax(1)]
+        Fm = F_minus.reshape(-1, n_chk)[np.arange(len(blocks)), r[blocks].argmax(1)]
+        p = pi_ref[win]
+        est.append(np.mean(np.log((np.minimum(1.0, Fm + p) ** n_chk - Fm ** n_chk) / p)))
+    est = np.array(est)
+    i64 = int(np.flatnonzero(rows[:, 0] == n_chk)[0])
+    print(f"  estimator of the exact KL (K=8, n={n_chk}, pools of {pool_size} reference samples, "
+          f"{n_pools} pools): mean {est.mean():.3f}, sd {est.std(ddof=1):.3f}, range "
+          f"{est.min():.3f}-{est.max():.3f}  (exact {rows[i64, 1]:.3f}, bound {rows[i64, 3]:.3f})")
     # optimal frontier on the K=10^4 problem vs best-of-n at equal KL
     beta_grid = np.logspace(-2.5, 1.5, 200)
     front = np.array([(kl(closed_form(pi_u, r_u, b)[0], pi_u), closed_form(pi_u, r_u, b)[0] @ r_u)

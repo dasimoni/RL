@@ -2,18 +2,19 @@
 
 Companion code for [Chapter 16](../../chapters/16-offline-rl-and-imitation.md). Every script runs from the repository root, fixes its seeds, prints its settings and a results summary, and accepts `--quick` (a smoke test that writes no figures). Full runs write figures to `figures/`.
 
-The tabular demos use NumPy and compute expected costs and values exactly, by propagating distributions or solving linear systems. The CartPole experiments use small PyTorch MLPs on one CPU thread (`torch.set_num_threads(1)`).
+The tabular demos use NumPy and compute expected costs and values exactly, by propagating distributions or solving linear systems. The CartPole experiments and `multimodal_bc.py` use small PyTorch MLPs on one CPU thread (`torch.set_num_threads(1)`).
 
 | Script | What it demonstrates | Command | Quick | Full |
 |---|---|---|---|---|
 | `dagger_vs_bc.py` | Compounding errors on an unstable "tightrope" (Section 2.6): BC vs DAgger with the same 1,000 expert labels, excess cost vs horizon, and label efficiency | `python code/ch16_offline_rl_and_imitation/dagger_vs_bc.py` | 2–3 s | 112–141 s |
+| `multimodal_bc.py` | Behaviour cloning on bimodal demonstrations around an obstacle (Section 2.8): MSE, Gaussian, mixture density networks (2 and 5 components), 41 bins per dimension, a DDPM diffusion policy, and the same DDPM with action chunks of 4; two equal-budget controls (DDPM with 4,000 steps, five-component MDN with 16,000); 3 seeds × 500 rollouts | `python code/ch16_offline_rl_and_imitation/multimodal_bc.py` | 8–10 s | 370–375 s |
 | `irl_gridworld.py` | BC, apprenticeship learning (projection method) and MaxEnt IRL (Sections 3–4) on a terrain gridworld; transfer to a changed world | `python code/ch16_offline_rl_and_imitation/irl_gridworld.py` | 1 s | 17–23 s |
 | `offline_cartpole.py` | Offline RL on CartPole-v1 (Sections 6–9): expert / medium / random datasets of 20k transitions; BC, naive offline DQN, discrete BCQ (with a diagnostic of its action filter), CQL(H), IQL; 5 seeds | `python code/ch16_offline_rl_and_imitation/offline_cartpole.py` | 12–15 s | 300–372 s |
 | `offline_sensitivity.py` | CQL's alpha and IQL's (tau, beta) swept on the medium and random datasets, with diagnostics of IQL's failure, plus an expectile probe on the expert data (Sections 8.6, 9.4) | `python code/ch16_offline_rl_and_imitation/offline_sensitivity.py` | 5–7 s | 415 s |
 | `cql_tabular.py` | The CQL lower-bound theorems checked in a table, exactly and with finite data (Section 8.5) | `python code/ch16_offline_rl_and_imitation/cql_tabular.py` | <1 s | 3–4 s |
 | `sequence_vs_dp.py` | Return-conditioned supervised learning (Decision-Transformer style) vs in-sample DP: stitching and luck (Section 11) | `python code/ch16_offline_rl_and_imitation/sequence_vs_dp.py` | <1 s | <1 s |
 | `ope_tabular.py` | Off-policy evaluation (Section 12): IS, WIS, PDIS, WPDIS, FQE, DR, WDR, plus FQE and DR with a misspecified model, vs data size, horizon and policy mismatch | `python code/ch16_offline_rl_and_imitation/ope_tabular.py` | <1 s | 58–61 s |
-| `exercise_solutions.py` | Numerical checks for Exercises 16.2, 16.9, 16.10, 16.13 (tabular GAIL, with a stable and a too-large discriminator step) and 16.14 (offline policy selection) | `python code/ch16_offline_rl_and_imitation/exercise_solutions.py` | 2 s | 15–16 s |
+| `exercise_solutions.py` | Numerical checks for Exercises 16.2, 16.9, 16.10, 16.13 (tabular GAIL, with a stable and a too-large discriminator step), 16.14 (offline policy selection), 16.15 (mode averaging in one step) and 16.16 (policy gradient through a denoising chain) | `python code/ch16_offline_rl_and_imitation/exercise_solutions.py` | 2 s | 16–18 s |
 | `offline_lib.py` | Shared CartPole pieces: scripted expert (LQR) and medium policies, dataset collection, `EnsembleMLP` (one ensemble member per seed), lockstep evaluation | (imported) | | |
 | `plot_style.py` | Shared matplotlib style | (imported) | | |
 
@@ -22,6 +23,23 @@ Times are wall-clock seconds on a shared 4-CPU machine with one thread per scrip
 ## Headline results (full runs)
 
 **`dagger_vs_bc.py`** (300 draws of the training data, exact expected costs). With 1,000 expert labels, BC's excess cost grows with fitted log–log slope 1.44 (10 ≤ T ≤ 100) and 1.54 (100 ≤ T ≤ 1000); DAgger's with 1.17 and 1.32. Excess cost per step from T = 10 to T = 3000: BC 0.024 → 0.274, DAgger 0.022 → 0.081. At T = 1000, DAgger reaches an excess cost of 63 with 1,000 labels; BC needs about 10,000 labels to get to 74. BC's error on the expert's own distribution, averaged over the first T steps (ε_T of Eq. 16.3), is 0.097 at every T from 10 to 3000, so the bound ε_T T² is very loose here (9.7 vs an actual 0.24 at T = 10). Both learners are stationary policies, so their per-step excess saturates (BC ≈ 0.27, DAgger ≈ 0.08 at T = 3000).
+
+**`multimodal_bc.py`** (3 seeds × 500 rollouts; range over seeds in brackets; learners trained for 4,000 gradient steps unless stated; the expert detours ±0.1 per step at the decision state (0, 0.3), so the average action leads into the obstacle):
+
+| policy | collisions | success | passed left (of successes) | queries / episode | samples with \|dx\| < 0.05 at the decision state |
+|---|---|---|---|---|---|
+| expert | 0% | 100% | 49% | 20.5 | 12% |
+| MSE | 64.8% (58.8–74.2%) | 35.2% | 60% | 12.1 | 100% |
+| Gaussian (sampled) | 45.0% (41.0–48.0%) | 55.0% | 57% | 14.7 | 37% |
+| MDN, 2 components | 47.5% (46.4–49.6%) | 52.5% | 50% | 14.4 | 36% |
+| MDN, 5 components | 29.7% (1.0–44.6%) | 70.3% | 54% | 16.7 | 24% |
+| 41 bins per dimension | 0.5% (0.4–0.8%) | 97.4% | 55% | 21.3 | 0% |
+| DDPM, K = 20 (16,000 steps) | 1.7% (1.4–2.0%) | 98.3% | 53% | 20.3 | 2% |
+| DDPM, chunks of 4 (16,000 steps) | 3.2% (2.8–3.4%) | 96.8% | 53% | 5.4 | 1% |
+| control: DDPM, 4,000 steps | 16.5% (13.6–18.4%) | 83.5% | 54% | 18.3 | 13% |
+| control: MDN, 5 components, 16,000 steps | 0.0% (0.0–0.0%) | 100% | 52% | 20.5 | 0% |
+
+The two-component MDN collapsed in every seed to one component carrying 99–100% of the weight at the decision state (mean within 0.015 of 0, sd 0.10–0.11); the five-component MDN found both modes in seed 0 (weights 0.52/0.48 on ±0.1) and collapsed the same way in seeds 1 and 2. With 16,000 steps the five-component MDN found both modes in all three seeds. Losses on the whole training set: collapsed five-component MDNs −8.05 and −8.04, the one that found both modes −8.16, the Gaussian −8.03 to −8.05. The binned policy's other failures (2.1%) all reached y = 1 outside the gate. The Gaussian's 37% between the modes matches the one-step prediction of Exercise 16.15 (38.1%). MSE-BC's deterministic action at the decision state is −0.003, +0.001 and −0.037 in the three seeds (the last seed's demonstrations went left 60% of the time).
 
 **`irl_gridworld.py`** (true returns over H = 30 steps):
 
@@ -55,4 +73,4 @@ Naive DQN's mean max-Q on dataset states reaches 1.5 × 10⁵ (expert) and 2.1 �
 | 100 | 5.52 | 0.66 | 2.19 | 0.39 | 0.19 | 0.44 | 0.63 | 0.73 | 0.39 |
 | 5000 | 1.18 | 0.24 | 0.31 | 0.11 | 0.02 | 0.41 | 0.12 | 0.12 | 0.11 |
 
-**`exercise_solutions.py`**: tabular GAIL with a stable discriminator step (lr_d = 0.2) reaches JS divergence 0.0007 to the empirical expert occupancy (return 48.7 vs expert 49.4), with D at the goal 0.50–0.51 and 0.41–0.62 elsewhere on the expert's support; in the transfer world the replayed policy scores 17.43 and the re-optimised discriminator reward 50.00 (optimum 56.67; it crosses a mud cell no demonstration entered). With lr_d = 1 the discriminator update is unstable at the high-occupancy goal (linearised factor 5.89 > 2): D there flips between ≈0.01 and ≈0.94 from one iteration to the next, and JS stalls near 0.03. Offline selection among 7 candidate policies: FQE picks the best one in 100% of 300 datasets, DR 76%, WDR 68%, WPDIS 1%, WIS 0%.
+**`exercise_solutions.py`**: tabular GAIL with a stable discriminator step (lr_d = 0.2) reaches JS divergence 0.0007 to the empirical expert occupancy (return 48.7 vs expert 49.4), with D at the goal 0.50–0.51 and 0.41–0.62 elsewhere on the expert's support; in the transfer world the replayed policy scores 17.43 and the re-optimised discriminator reward 50.00 (optimum 56.67; it crosses a mud cell no demonstration entered). With lr_d = 1 the discriminator update is unstable at the high-occupancy goal (linearised factor 5.89 > 2): D there flips between ≈0.01 and ≈0.94 from one iteration to the next, and JS stalls near 0.03. Offline selection among 7 candidate policies: FQE picks the best one in 100% of 300 datasets, DR 76%, WDR 68%, WPDIS 1%, WIS 0%. Exercise 16.15: a maximum-likelihood Gaussian fitted to actions ±0.1 + N(0, 0.01²) samples |a| < 0.05 with probability 0.381 (Monte Carlo 0.381), against 2.9 × 10⁻⁷ for the expert. Exercise 16.16: the score-function gradient through a two-step linear-Gaussian chain, from 2,000,000 chains with a constant baseline, is (3.790, 1.899) ± (0.005, 0.003) against the exact (3.8, 1.9).

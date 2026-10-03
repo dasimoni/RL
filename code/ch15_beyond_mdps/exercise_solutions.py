@@ -13,6 +13,10 @@ Each function prints the numbers quoted in the corresponding worked solution.
   Ex 13  tabular Q-learning with frame stacking (window-k) on the Tiger problem
   Ex 14  interrupting hallway options in the four rooms (interruption theorem)
   Ex 15  MAML on a quadratic: Eq. (15.32) by finite differences; exact vs first-order MAML
+  Ex 16  bisimulation metric (Eq. 15.29a) on small random MDPs and the bound |v*(s) - v*(t)| <= d(s, t)
+  Ex 19  a two-stage reward machine: product MDP vs memoryless policies on the corridor
+  Ex 20  an epistemic POMDP: two contexts, every memoryless policy is suboptimal
+  Ex 21  the PLR replay distribution, by hand and from procgen_lite.PLRSampler
 
 Run:  python code/ch15_beyond_mdps/exercise_solutions.py [--quick]   (no figures)
 """
@@ -302,6 +306,138 @@ def ex15(rng, c_bar=1.0, sigma=0.5, eta=0.05, steps=200, batch=32):
               f"{theta['first-order']:.4g}")
 
 
+def w1_distance(p, q, D):
+    """Wasserstein-1 distance between distributions p, q on n points with ground metric D (an LP)."""
+    from scipy.optimize import linprog
+    n = len(p)
+    A_eq = np.zeros((2 * n, n * n))
+    for i in range(n):
+        A_eq[i, i * n:(i + 1) * n] = 1.0          # row sums = p
+        A_eq[n + i, i::n] = 1.0                   # column sums = q
+    res = linprog(D.reshape(-1), A_eq=A_eq, b_eq=np.concatenate([p, q]), bounds=(0, None), method="highs")
+    return res.fun
+
+
+def ex16(rng, n=5, n_act=2, gamma=0.9, n_mdps=3, iters=150):
+    """Bisimulation metric (Eq. 15.29a) by fixed-point iteration; check |v*(s) - v*(t)| <= d(s, t)."""
+    worst_ratio, worst_gap = 0.0, -np.inf
+    for m in range(n_mdps):
+        r = rng.random((n, n_act))
+        P = rng.dirichlet(np.full(n, 0.5), size=(n, n_act))           # P[s, a, s']
+        d = np.zeros((n, n))
+        for _ in range(iters):
+            d_new = np.zeros((n, n))
+            for s_ in range(n):
+                for t_ in range(s_ + 1, n):
+                    d_new[s_, t_] = d_new[t_, s_] = max(
+                        abs(r[s_, a] - r[t_, a]) + gamma * w1_distance(P[s_, a], P[t_, a], d) for a in range(n_act))
+            delta = np.abs(d_new - d).max()
+            d = d_new
+            if delta < 1e-9:
+                break
+        v = np.zeros(n)
+        for _ in range(2000):
+            v = (r + gamma * P @ v).max(axis=1)
+        dv = np.abs(v[:, None] - v[None, :])
+        off = ~np.eye(n, dtype=bool)
+        worst_ratio = max(worst_ratio, (dv[off] / d[off]).max())
+        worst_gap = max(worst_gap, (dv - d)[off].max())
+    print(f"[Ex 16] bisimulation metric on {n_mdps} random MDPs ({n} states, {n_act} actions, gamma = {gamma}): "
+          f"max over state pairs of |v*(s) - v*(t)| / d(s, t) = {worst_ratio:.3f} (<= 1), "
+          f"max of |v*(s) - v*(t)| - d(s, t) = {worst_gap:.3f}")
+
+
+def ex19(gamma=0.9):
+    """Reward machine 'visit cell 0, then cell 3' on a 4-cell corridor; product MDP vs memoryless policies."""
+    from scipy.optimize import minimize
+    n = 4                                           # cells 0..3, start 1; actions 0 = left, 1 = right
+
+    def move(c, a):
+        return max(0, c - 1) if a == 0 else min(n - 1, c + 1)
+
+    # product states (c, u), u = 0 (0 not yet visited) or 1 (visited); reaching 3 with u = 1 pays 1 and ends
+    def value(pR):                                  # pR[c, u] = probability of "right"
+        idx = {(c, u): i for i, (c, u) in enumerate((c, u) for u in (0, 1) for c in range(n))}
+        A = np.eye(2 * n)
+        b = np.zeros(2 * n)
+        for (c, u), i in idx.items():
+            for a, pa in ((0, 1 - pR[c, u]), (1, pR[c, u])):
+                c2 = move(c, a)
+                u2 = 1 if (u == 1 or c2 == 0) else 0
+                if u2 == 1 and c2 == n - 1:
+                    b[i] += pa                      # reward 1, episode ends
+                else:
+                    A[i, idx[(c2, u2)]] -= gamma * pa
+        return np.linalg.solve(A, b)[idx[(1, 0)]]
+
+    import itertools
+    best_prod = max(value(np.array(pol, dtype=float).reshape(n, 2)) for pol in itertools.product((0, 1), repeat=2 * n))
+    best_det = max(value(np.repeat(np.array(pol, dtype=float)[:, None], 2, axis=1))
+                   for pol in itertools.product((0, 1), repeat=n))
+    from scipy.special import expit
+    f = lambda x: -value(np.repeat(expit(x)[:, None], 2, axis=1))
+    rng = np.random.default_rng(19)
+    best_sto = max(-minimize(f, rng.normal(size=n) * 2, method="Nelder-Mead",
+                             options={"xatol": 1e-9, "fatol": 1e-12, "maxiter": 20000}).fun for _ in range(20))
+    uniform = value(np.full((n, 2), 0.5))
+    print(f"[Ex 19] reward machine 'visit 0 then 3', start in cell 1, gamma = {gamma}: optimal value on the "
+          f"product MDP {best_prod:.4f} (= gamma^3); best deterministic memoryless policy {best_det:.4f}; best "
+          f"stochastic memoryless policy {best_sto:.4f}; uniform random policy {uniform:.4f}")
+
+
+def ex20(gamma=0.9):
+    """Epistemic POMDP: corridor -2..2, start 0, goal at -2 (context L) or +2 (context R), equally likely."""
+    from scipy.optimize import minimize
+    cells = [-2, -1, 0, 1, 2]
+
+    def value_ctx(pR, goal):
+        idx = {c: i for i, c in enumerate(cells)}
+        A = np.eye(5)
+        b = np.zeros(5)
+        for c in cells:
+            if c == goal:
+                continue                            # absorbing (episode over), value 0
+            for step, pa in ((-1, 1 - pR[idx[c]]), (1, pR[idx[c]])):
+                c2 = min(2, max(-2, c + step))
+                if c2 == goal:
+                    b[idx[c]] += pa
+                else:
+                    A[idx[c], idx[c2]] -= gamma * pa
+        return np.linalg.solve(A, b)[idx[0]]
+
+    def value(pR):
+        return 0.5 * value_ctx(pR, -2) + 0.5 * value_ctx(pR, 2)
+
+    import itertools
+    best_det = max(value(np.array(p_, dtype=float)) for p_ in itertools.product((0, 1), repeat=5))
+    from scipy.special import expit
+    f = lambda x: -value(expit(x))
+    rng = np.random.default_rng(20)
+    runs = [minimize(f, rng.normal(size=5) * 2, method="Nelder-Mead",
+                     options={"xatol": 1e-10, "fatol": 1e-13, "maxiter": 40000}) for _ in range(30)]
+    best = min(runs, key=lambda r_: r_.fun)
+    p_best = expit(best.x)
+    bayes = 0.5 * gamma + 0.5 * gamma ** 5
+    print(f"[Ex 20] epistemic corridor (gamma = {gamma}): Bayes-optimal (history-dependent) value {bayes:.4f}; "
+          f"per-context optimum {gamma:.4f}; best deterministic memoryless {best_det:.4f}; best stochastic "
+          f"memoryless {-best.fun:.4f} with P(right | cell -2..2) = " + ", ".join(f"{x:.3f}" for x in p_best))
+
+
+def ex21():
+    """PLR replay distribution by hand vs procgen_lite.PLRSampler.probs()."""
+    import procgen_lite as pg
+    scores = [0.5, 0.2, 0.05, 0.3]
+    last = [44, 35, 15, 41]                         # episode count when each level was last played
+    for beta in (1.0, 0.1):
+        smp = pg.PLRSampler(levels=[0, 1, 2, 3], rng=np.random.default_rng(0), beta=beta, lam=0.1)
+        smp.score = {i: s_ for i, s_ in enumerate(scores)}
+        smp.last = {i: l_ for i, l_ in enumerate(last)}
+        smp.episodes = 45
+        _, p = smp.probs()
+        print(f"[Ex 21] PLR, scores {scores}, staleness {[45 - l_ for l_ in last]}, beta = {beta}, lambda = 0.1: "
+              f"P_replay = " + ", ".join(f"{x:.3f}" for x in p))
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--quick", action="store_true")
@@ -320,6 +456,10 @@ def main():
     ex13(20_000 if args.quick else 500_000, 1 if args.quick else 3)
     ex14()
     ex15(np.random.default_rng(15))
+    ex16(np.random.default_rng(16), n_mdps=1 if args.quick else 3)
+    ex19()
+    ex20()
+    ex21()
     print(f"done in {time.time() - t0:.1f} s")
 
 

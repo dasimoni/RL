@@ -10,6 +10,11 @@
                   (main run) and one that is too large (contrast run).
   Exercise 16.14  offline policy selection: pick the best of several candidate policies from
                   logged data using an OPE estimator (ope_tabular.py's MDP).
+  Exercise 16.15  mode averaging in one step: collision probability of MSE-BC, of a maximum-
+                  likelihood Gaussian and of the bimodal expert (closed form and Monte Carlo).
+  Exercise 16.16  the denoising chain as an MDP: the score-function gradient summed over the
+                  per-step Gaussian log-likelihoods of a sampled chain is unbiased for the gradient
+                  of the expected reward of the final sample (a 2-step linear-Gaussian chain).
 
 Run:  python code/ch16_offline_rl_and_imitation/exercise_solutions.py [--quick]
 (No figures.)
@@ -217,6 +222,54 @@ def policy_selection(quick):
         print(f"    {m:6s}: {c.mean():.3f}   (picked the best candidate in {np.mean(c == v_true.max()):.0%} of datasets)")
 
 
+# ---------------------------------------------------------------- Exercise 16.15
+def mode_averaging(rng):
+    from scipy.stats import norm
+    print("\nExercise 16.15: expert action a = +m or -m (prob 1/2 each) plus N(0, s^2) noise; |a| < c collides")
+    m, s, c = 0.1, 0.01, 0.05
+    p_expert = norm.cdf((c - m) / s) - norm.cdf((-c - m) / s)          # the same for both modes
+    sd = np.sqrt(m ** 2 + s ** 2)                                     # ML Gaussian: moment matching
+    p_gauss = 2 * norm.cdf(c / sd) - 1
+    a = rng.choice([-m, m], 1_000_000) + s * rng.standard_normal(1_000_000)
+    mu_hat, sd_hat = a.mean(), a.std()
+    b = mu_hat + sd_hat * rng.standard_normal(1_000_000)
+    print(f"  m = {m}, s = {s}, c = {c}")
+    print(f"  MSE-BC (deterministic mean 0):  P(collide) = 1")
+    print(f"  ML Gaussian N(0, m^2 + s^2), sd {sd:.4f}: P(collide) = {p_gauss:.4f}   "
+          f"(Monte Carlo: fitted mean {mu_hat:+.5f}, sd {sd_hat:.4f}, P = {np.mean(np.abs(b) < c):.4f})")
+    print(f"  expert (or an exact 2-component mixture): P(collide) = {p_expert:.2e}   "
+          f"(Monte Carlo: {np.mean(np.abs(a) < c):.2e})")
+
+
+# ---------------------------------------------------------------- Exercise 16.16
+def denoising_chain_gradient(rng, quick):
+    """Chain a2 ~ N(0, 1), a1 ~ N(th1 + 0.5 a2, s1^2), a0 ~ N(th0 + 0.5 a1, s0^2); reward
+    R(a0) = -(a0 - 2)^2.  a0 is Gaussian with mean th0 + 0.5 th1 and variance s0^2 + 0.25 s1^2
+    + 0.0625, so grad J is known in closed form.  Compare with the score-function estimate
+    E[ R(a0) * sum_k grad log p(a^{k-1} | a^k) ]."""
+    print("\nExercise 16.16: policy gradient through a 2-step denoising chain (score function of the chain)")
+    th0, th1, s0, s1 = 0.3, -0.4, 0.5, 0.8
+    mean0 = th0 + 0.5 * th1
+    # J = E[-(a0 - 2)^2] = -(mean0 - 2)^2 - var0;  dJ/dth0 = -2 (mean0 - 2), dJ/dth1 = 0.5 dJ/dth0
+    g_exact = np.array([-2 * (mean0 - 2), -(mean0 - 2)])
+    n = 200_000 if quick else 2_000_000
+    a2 = rng.standard_normal(n)
+    a1 = th1 + 0.5 * a2 + s1 * rng.standard_normal(n)
+    a0 = th0 + 0.5 * a1 + s0 * rng.standard_normal(n)
+    R = -(a0 - 2) ** 2
+    score0 = (a0 - th0 - 0.5 * a1) / s0 ** 2            # d/dth0 log N(a0; th0 + 0.5 a1, s0^2)
+    score1 = (a1 - th1 - 0.5 * a2) / s1 ** 2            # d/dth1 log N(a1; th1 + 0.5 a2, s1^2)
+    # th1 also moves a0's mean only through the sample a1, which the chain's score accounts for
+    g_naive = np.array([np.mean(R * score0), np.mean(R * score1)])
+    b = R.mean()                                         # a constant baseline (variance reduction)
+    g_base = np.array([np.mean((R - b) * score0), np.mean((R - b) * score1)])
+    se = np.array([np.std((R - b) * score0), np.std((R - b) * score1)]) / np.sqrt(n)
+    print(f"  exact grad J = {np.round(g_exact, 4).tolist()}")
+    print(f"  score-function estimate ({n:,} chains)           = {np.round(g_naive, 4).tolist()}")
+    print(f"  with a constant baseline                          = {np.round(g_base, 4).tolist()}"
+          f"  (standard errors {np.round(se, 4).tolist()})")
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--quick", action="store_true")
@@ -229,6 +282,8 @@ def main():
     awr_check(rng)
     gail_check(args.quick)
     policy_selection(args.quick)
+    mode_averaging(np.random.default_rng(16))
+    denoising_chain_gradient(np.random.default_rng(17), args.quick)
     print(f"total time {time.time() - t0:.1f}s")
 
 

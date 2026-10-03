@@ -14,7 +14,7 @@ environment while learning.
   "no bootstrap after termination". gamma = 0.99 (FQI's contraction argument needs
   gamma < 1).
 
-* (a) k-NN averager FQI: Q_k(s,a) = mean of the targets of the K = 10 stored transitions
+* (a) K-NN averager FQI: Q_k(s,a) = mean of the targets of the K = 10 stored transitions
   with action a whose states are nearest to s (states rescaled to [0,1]^2). The weights
   depend only on states, never on targets: an averager (Gordon, 1995), so FQI is a
   gamma-contraction in the sup norm and must converge.
@@ -206,7 +206,7 @@ class TileLeastSquares:
 
     def hat_inf_norm(self, n_rows, rng):
         """Lower bound on the sup-norm gain of the fit, max_i sum_j |H_ij|, over n_rows sampled
-        bootstrap points (H maps the targets of action a to Q(s'_i, a)). An averager has 1."""
+        bootstrap points (H maps the targets of action a to Q(s'_i, a)). An averager has at most 1."""
         rows = rng.choice(self.X2.shape[0], size=min(n_rows, self.X2.shape[0]), replace=False)
         best = 0.0
         for c, X in zip(self.chol, self.X):
@@ -323,7 +323,7 @@ def main():
             trace = (seed == args.seed and N in trace_sizes)
             ev = eval_at if trace else ()
             row = dict(N=N, seed=seed, n_boot=int((~data["term"]).sum()))
-            # (a) k-NN averager FQI
+            # (a) K-NN averager FQI
             knn = KNNAverager(data, K=K)
             out = fqi(knn, data, max_fqi, eval_at=ev, starts=starts)
             st = greedy_steps(lambda X: knn.q(out["params"], X).argmax(1), starts)
@@ -390,7 +390,7 @@ def main():
     for N in sizes:
         rows = [r for r in results if r["N"] == N]
         print(f" N = {N}")
-        line("k-NN averager FQI", rows, "knn", lambda d: d["status"] == "converged")
+        line("K-NN averager FQI", rows, "knn", lambda d: d["status"] == "converged")
         for lam in lams:
             line(f"LS-FQI, lambda={lam:g}", rows, ("ls", lam), lambda d: d["status"] == "converged")
             div = sum(r[("ls", lam)]["status"] == "diverged" for r in rows)
@@ -425,7 +425,7 @@ def main():
         for N in trace_sizes:
             r0 = [r for r in results if r["N"] == N and r["seed"] == args.seed][0]
             print(f"  sup-norm gain of the LS tile fit (lambda={lams[0]:g}), N={N}: max_i sum_j |H_ij| >= "
-                  f"{r0['hat']:.1f} over 2,000 sampled bootstrap points (an averager has exactly 1)")
+                  f"{r0['hat']:.1f} over 2,000 sampled bootstrap points (an averager has at most 1)")
 
     if not args.quick:
         make_figure(traces, trace_sizes, h.mean())
@@ -438,7 +438,7 @@ def make_figure(traces, trace_sizes, heuristic_steps):
     import matplotlib.pyplot as plt
     os.makedirs(FIG_DIR, exist_ok=True)
     colors = {"knn": "tab:blue", "ls": "tab:orange", "lspi": "tab:green"}
-    labels = {"knn": "k-NN averager FQI", "ls": "least-squares FQI (tiles)", "lspi": "LSPI (tiles)"}
+    labels = {"knn": "K-NN averager FQI", "ls": "least-squares FQI (tiles)", "lspi": "LSPI (tiles)"}
     styles = {trace_sizes[0]: "--", trace_sizes[-1]: "-"}
     fig, axes = plt.subplots(1, 3, figsize=(16, 4.6))
 
@@ -476,7 +476,9 @@ def make_figure(traces, trace_sizes, heuristic_steps):
         lh = traces[("lspi", N)]["hist"]
         m = [hh["m"] for hh in lh[1:]]
         ch = [max(hh["changed"], 0.5) for hh in lh[1:]]
-        ax.semilogy(m, ch, color=colors["lspi"], ls=styles[N], lw=2, marker="o", ms=5,
+        small = N == trace_sizes[0]
+        ax.semilogy(m, ch, color="tab:olive" if small else colors["lspi"], ls=styles[N], lw=1.5,
+                    marker="s" if small else "o", ms=5, mfc="none" if small else None,
                     label=f"LSPI, N={N:,}")
     ax.set_xlabel("LSPI iteration m")
     ax.set_ylabel("next states whose greedy action changed")

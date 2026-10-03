@@ -11,6 +11,8 @@ Part A -- blocking (Kamin, 1969) under two learning rules
       representation: a trial is a sequence of time steps; stimulus i present for k steps since its
       onset activates its own feature x_{i,k}; V_t = w^T x_t, and linear TD(0)
           delta_t = r_{t+1} + gamma * V_{t+1} - V_t,     w <- w + alpha * delta_t * x_t.
+      (Sutton and Barto's model updates through an eligibility trace, i.e. linear TD(lambda); we use
+      its simplest form, lambda = 0.)
       Time steps with no stimulus have x = 0, so V = 0 there (the inter-trial interval).
     Blocking design: phase 1 pairs A with the US; phase 2 pairs the compound AX with the US.
     Control group: phase 1 pairs a different stimulus B with the US instead.  Test: X alone.

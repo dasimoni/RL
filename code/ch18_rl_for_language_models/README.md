@@ -6,11 +6,12 @@ Everything runs on CPU with one thread (PyTorch, NumPy, SciPy, Matplotlib). Run 
 
 | Script | What it demonstrates | Command | Quick | Full |
 |---|---|---|---|---|
-| `kl_bandit.py` | The KL-regularized optimum $\pi^\ast_\beta\propto\pi_{\mathrm{ref}}e^{r/\beta}$ on an 8-armed bandit, checked against SLSQP, exact gradient ascent and sampled REINFORCE-with-RLOO; population DPO recovers $\pi^\ast_\beta$; deterministic preferences make DPO collapse for every $\beta$ while IPO keeps a finite solution; exact best-of-$n$ KL vs $\log n-(n-1)/n$; best-of-$n$ vs the optimal reward–KL frontier | `python code/ch18_rl_for_language_models/kl_bandit.py` | 2 s | 15 s |
+| `kl_bandit.py` | The KL-regularized optimum $\pi^\ast_\beta\propto\pi_{\mathrm{ref}}e^{r/\beta}$ on an 8-armed bandit, checked against SLSQP, exact gradient ascent and sampled REINFORCE-with-RLOO; population DPO recovers $\pi^\ast_\beta$; deterministic preferences make DPO collapse for every $\beta$ while IPO keeps a finite solution; exact best-of-$n$ KL vs $\log n-(n-1)/n$, and a check of the sample-based estimator of that KL used by `rlhf_toy.py`; best-of-$n$ vs the optimal reward–KL frontier | `python code/ch18_rl_for_language_models/kl_bandit.py` | 2 s | 15 s |
 | `toy_lm.py` | Library (nothing to run): conditional GRU language model, masked sampling, per-token log-probs, exact per-token KL, scalar-head GRU for reward and value models | — | — | — |
 | `rlhf_toy.py` | The full pipeline on a toy LM: SFT on demonstrations → preferences from a hidden true reward → Bradley–Terry reward models (2k and 8k pairs) → PPO with per-token KL, value model and GAE ($\beta$ sweep), RLOO, DPO ($\beta$ sweep), IPO, best-of-$n$ (with an estimate of its exact KL); over-optimization curves. `--seed 1` / `--seed 2` replicate everything on a fresh instance of the toy (no figures) | `python code/ch18_rl_for_language_models/rlhf_toy.py` | 17 s | 5.2 min per seed |
-| `grpo_rlvr.py` | RL with a verifier on running-sum arithmetic with a systematic "carry bug" in the base model: REINFORCE, RLOO, GRPO, Dr. GRPO (no KL, as in its objective), DAPO-lite, GRPO with process rewards, and two ablations (GRPO without KL, Dr. GRPO with KL), 3 seeds each; pass@$k$ and majority voting for base vs GRPO | `python code/ch18_rl_for_language_models/grpo_rlvr.py` | 11 s | 6.4 min |
-| `exercise_solutions.py` | Numerical checks for Exercises 1–10 (including the Exercise 1 counterexample); adaptive KL control (Ex. 11), SimPO vs DPO (Ex. 12), one round of iterated RLHF with the repeat probe of both reward models (Ex. 13) | `python code/ch18_rl_for_language_models/exercise_solutions.py` | 13 s | 2.6 min |
+| `grpo_rlvr.py` | RL with a verifier on running-sum arithmetic with a systematic "carry bug" in the base model: REINFORCE, RLOO, GRPO, Dr. GRPO (no KL, as in its objective), DAPO-lite, GRPO with process rewards, two ablations (GRPO without KL, Dr. GRPO with KL) and two filtered-SFT / expert-iteration runs (Section 9.5: summed over kept samples, and averaged per prompt), 3 seeds each; pass@$k$ and majority voting for base vs GRPO | `python code/ch18_rl_for_language_models/grpo_rlvr.py` | 11 s | 8.1 min |
+| `multiturn_tool_toy.py` | Multi-turn RL with a tool (Section 13): the same task with a CALC token whose result the environment writes into the sequence as an observation token, under a 9-token budget. Masked trajectory-level GRPO (eq. 18.35), filtered SFT, GRPO without observation masks, and a sampler 8 updates stale with and without truncated importance weights, 3 seeds each | `python code/ch18_rl_for_language_models/multiturn_tool_toy.py` | 12 s | 4.1 min |
+| `exercise_solutions.py` | Numerical checks for Exercises 1–10 (including the Exercise 1 counterexample) and 14 (expert-iteration gradients, Monte Carlo); adaptive KL control (Ex. 11), SimPO vs DPO (Ex. 12), one round of iterated RLHF with the repeat probe of both reward models (Ex. 13) | `python code/ch18_rl_for_language_models/exercise_solutions.py` | 14 s | 2.4 min |
 
 ## Headline results (full runs)
 
@@ -18,7 +19,7 @@ Everything runs on CPU with one thread (PyTorch, NumPy, SciPy, Matplotlib). Run 
 * Closed form vs solvers, max |difference| in probability: SLSQP $\le 2.8\times10^{-7}$; exact gradient $2.1\times10^{-4}$ ($\beta=0.1$; $3.0\times10^{-5}$ after 100,000 steps, the problem is badly conditioned because $\pi^\ast_{0.1}$ has probabilities down to $2.5\times10^{-11}$) to $4.5\times10^{-16}$ ($\beta=2$); sampled REINFORCE with a leave-one-out baseline $7.8\times10^{-4}$ to $5.6\times10^{-17}$ (zero-variance gradient at the optimum).
 * Population DPO (Bradley–Terry preferences, L-BFGS) matches $\pi^\ast_\beta$ to $\le 2.1\times10^{-8}$.
 * Deterministic preferences: DPO goes to the point mass on the best arm (KL 2.483) for $\beta=0.1, 0.5, 2$; IPO converges to $\pi_{\mathrm{ref}}e^{p(y\succ\pi_{\mathrm{ref}})/\tau}/Z$ (error $\le 10^{-9}$) with KL 1.281 / 0.149 / 0.010 for $\tau=0.1/0.5/2$.
-* Best-of-$n$ KL equals $\log n-(n-1)/n$ for $10^4$ equiprobable responses, but saturates at 2.483 on the 8-arm bandit. On the $10^4$-response problem best-of-$n$ reaches 91.5%, 92.8%, 94.6% and 96.2% of the optimal frontier's reward at the same KL for $n=4, 16, 64, 256$ (expected reward 1.044 / 1.778 / 2.356 / 2.823 vs 1.140 / 1.916 / 2.490 / 2.934).
+* Best-of-$n$ KL equals $\log n-(n-1)/n$ for $10^4$ equiprobable responses, but saturates at 2.483 on the 8-arm bandit. The sample-based estimator of the exact KL (pools of 65,536 reference samples, 20 pools) gives $2.431\pm0.043$ (range 2.278–2.468) at $n=64$, against the exact 2.457 and the bound 3.175. On the $10^4$-response problem best-of-$n$ reaches 91.5%, 92.8%, 94.6% and 96.2% of the optimal frontier's reward at the same KL for $n=4, 16, 64, 256$ (expected reward 1.044 / 1.778 / 2.356 / 2.823 vs 1.140 / 1.916 / 2.490 / 2.934).
 
 **`rlhf_toy.py`** (seed 0; true reward of $\pi_{\mathrm{ref}}$ = 0.818, best achievable 4.039)
 
@@ -58,13 +59,29 @@ Robust: collapse onto repetition at $\beta=0.01$, peak-and-fall, best final $\be
 | Dr. GRPO, $\beta=0.04$ (ablation) | 0.670 (0.663–0.684) | 0.833 | 1.49 | 51,200 |
 | DAPO-lite | 0.741 (0.734–0.746) | 0.866 | 1.83 | 72,946 (0.700 at 51,200) |
 | GRPO + process reward | 0.773 (0.749–0.788) | 0.905 | 1.49 | 51,200 |
+| Filtered SFT, summed (Section 9.5) | 0.683 (0.678–0.688) | 0.808 | 1.94 | 51,200 |
+| Filtered SFT, per prompt (Section 9.5) | 0.640 (0.632–0.644) | 0.765 | 2.27 | 51,200 |
 
 With the same $\beta=0.04$ GRPO beats Dr. GRPO by 0.03, but that is confounded (Dr. GRPO's unnormalized advantages are 2–3× smaller, so the same $\beta$ regularizes it more); with $\beta=0$ for both the gap is 0.012 and the seed ranges overlap. Removing the KL term from GRPO did not hurt, so the KL anchor is not what separates GRPO-style updates from REINFORCE/RLOO here. DAPO-lite's dynamic sampling refills each batch with exactly as many new prompts as groups are missing, so an update costs about $256/(1-f)$ responses for a no-signal fraction $f$: 302 per update early ($f=0.15$), 426 late ($f=0.39$), 365 on average. At the others' budget of 51,200 responses it matches GRPO (0.700); it reached its higher final accuracy only with the extra samples. Base model accuracy is evaluated with 16 samples per problem, the RL models with 4.
 
 Test-time compute: base pass@64 = 0.998, but base maj@$k$ *falls* from 0.364 ($k=1$) to 0.270 ($k=64$) because the carry bug is systematic; after GRPO, maj@$k$ rises from 0.706 to 0.847.
 
-**`exercise_solutions.py`**: Exercise 1, the exact-KL sum has variance 0.098 vs 2.764 for the sampled log-ratio sum on a random tree, but a two-step counterexample gives 0.302 vs 0; adaptive KL control rescues a $\beta=0.01$ run (true reward 0.81 → 3.36) but reacts too slowly to keep the KL near its target; SimPO ≈ DPO (2.90 vs 3.05 true reward); one round of iterated RLHF raises the true reward at $\beta=0.01$ from 0.63 to 3.11 without eliminating repetition (the repeat probe of the retrained reward model is flatter for two topics, steeper for the other two). Exercises 11–13 train their own SFT model and reward model, so their numbers differ from the main run's.
+Filtered SFT on the summed kept samples has, on the first minibatch step of each batch, exactly the gradient of REINFORCE without a baseline; it finished 0.05 above REINFORCE and 0.02 below GRPO. Averaging per prompt (weight about $1/p$ per prompt) did worse, also on the longest problems ($n=6$: 0.258 against 0.298).
+
+**`multiturn_tool_toy.py`** (3 seeds; base model: success 0.375, 0.79 tool calls per episode)
+
+| method | success (mean, range) | tool calls | tokens | truncated | log-prob of the actual tool outputs |
+|---|---|---|---|---|---|
+| GRPO, masked | 0.756 (0.733–0.775) | 2.98 | 8.3 | 6.4% | $-16.1$ |
+| Filtered SFT | 0.784 (0.765–0.801) | 2.58 | 7.7 | 4.4% | $-23.4$ |
+| GRPO, unmasked | 0.247 (0.022–0.536) | 3.43 | 8.3 | 67.5% | $-53.9$ |
+| GRPO, sampler 8 updates stale | 0.613 (0.600–0.623) | 2.40 | 7.1 | 1.7% | $-17.7$ |
+| same + truncated IS ($C=2$) | 0.680 (0.622–0.744) | 2.75 | 8.0 | 12.6% | $-16.6$ |
+
+The masked policy hands most steps to the tool, carry or not (75% of carry steps delegated, but only 34% of calls at carry steps, against 36% for the base model, which calls at random; 0.47 calls per episode after the last digit) and reaches only 0.16 at $n=6$. Without masks the policy stops ending its responses (P(EOS) after a tool output 0.11 vs 0.32 masked), and fabricated tool outputs rise only from 0.1% to 0.8% of episodes. The mean absolute log-ratio between trainer and stale sampler is 0.41 nats per policy token; truncated IS clips 1.9% of the weights. Its gain over the stale sampler is likely but not firm with 3 seeds: its worst seed (0.622) is level with the stale sampler's best (0.623).
+
+**`exercise_solutions.py`**: Exercise 14, the per-prompt average of filtered SFT weights $\nabla p$ by $(1-(1-p)^8)/p$ = 6.73 / 1.99 / 1.05 at $p$ = 0.05 / 0.5 / 0.95 (GRPO 4.59 / 2.00 / 4.59), confirmed by Monte Carlo to within 3.3%. Exercise 1, the exact-KL sum has variance 0.098 vs 2.764 for the sampled log-ratio sum on a random tree, but a two-step counterexample gives 0.302 vs 0; adaptive KL control rescues a $\beta=0.01$ run (true reward 0.81 → 3.36) but reacts too slowly to keep the KL near its target; SimPO ≈ DPO (2.90 vs 3.05 true reward); one round of iterated RLHF raises the true reward at $\beta=0.01$ from 0.63 to 3.11 without eliminating repetition (the repeat probe of the retrained reward model is flatter for two topics, steeper for the other two). Exercises 11–13 train their own SFT model and reward model, so their numbers differ from the main run's.
 
 ## Figures
 
-`figures/kl_bandit.png`, `figures/bon_kl.png`, `figures/rlhf_overoptimization.png`, `figures/rlhf_beta_sweep.png`, `figures/dpo_dynamics.png`, `figures/grpo_rlvr_curves.png`, `figures/grpo_rlvr_tts.png` (written by full runs with the default seed 0 only).
+`figures/kl_bandit.png`, `figures/bon_kl.png`, `figures/rlhf_overoptimization.png`, `figures/rlhf_beta_sweep.png`, `figures/dpo_dynamics.png`, `figures/grpo_rlvr_curves.png`, `figures/grpo_rlvr_tts.png`, `figures/multiturn_tool_toy.png` (written by full runs with the default seed 0 only; the filtered-SFT runs of `grpo_rlvr.py` are reported in the text, not in its figures).

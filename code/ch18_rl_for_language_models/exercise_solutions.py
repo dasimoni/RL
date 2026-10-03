@@ -1,10 +1,12 @@
 """Numerical checks and coding solutions for the Chapter 18 exercises.
 
-Each function prints the numbers quoted in the corresponding solution.  The last three
-(Exercises 11-13) re-use the toy RLHF pipeline of rlhf_toy.py.
+Each function prints the numbers quoted in the corresponding solution.  Exercises 11-13
+re-use the toy RLHF pipeline of rlhf_toy.py.  Exercise 14 (expert iteration) is a Monte Carlo
+check on a softmax policy; Exercise 15 is a derivation whose numbers come from
+multiturn_tool_toy.py.
 
 Run from the repository root:
-    python code/ch18_rl_for_language_models/exercise_solutions.py           # ~2.5 min
+    python code/ch18_rl_for_language_models/exercise_solutions.py           # ~2.5 min (one core, shared machine)
     python code/ch18_rl_for_language_models/exercise_solutions.py --quick   # smoke test
 """
 from __future__ import annotations
@@ -160,6 +162,38 @@ def ex10_k3_gradient():
     print(f"[Ex 10] grad KL(pi||ref)  = {np.round(rev.numpy(), 4)}")
 
 
+def ex14_expert_iteration(n_groups=400_000):
+    """Expected gradient of filtered SFT on a softmax 'policy' over K responses, binary reward.
+
+    grad log pi(y) = e_y - pi for softmax logits.  Per-prompt average of the kept samples:
+    E[g_bar] = (1 - (1-p)^k) grad p / p.  Sum over kept samples: E[g_sum] = k grad p."""
+    rng = np.random.default_rng(SEED + 14)
+    K, k = 6, 8
+    for target_p in [0.05, 0.5, 0.95]:
+        logits = rng.normal(size=K)
+        r = np.zeros(K)
+        r[:2] = 1.0  # responses 0 and 1 are correct; shift their logits to hit the target p
+        q = softmax(logits)
+        shift = np.log(target_p / (1 - target_p)) - np.log(q[:2].sum() / q[2:].sum())
+        pi = softmax(logits + shift * r)
+        p = pi @ r
+        grad_p = (pi * r) @ (np.eye(K) - pi)          # sum_y pi(y) r(y) (e_y - pi)
+        ys = rng.choice(K, size=(n_groups, k), p=pi)
+        rs = r[ys]
+        c = rs.sum(1)
+        onehot = np.zeros((n_groups, K))
+        np.add.at(onehot, (np.repeat(np.arange(n_groups), k), ys.ravel()), rs.ravel())
+        # sum over kept samples of (e_y - pi), then the per-prompt average (0 if nothing kept)
+        g_sum = onehot - c[:, None] * pi
+        g_bar = g_sum / np.maximum(c, 1)[:, None]
+        w_bar = (1 - (1 - p) ** k) / p
+        err_bar = np.abs(g_bar.mean(0) - w_bar * grad_p).max() / np.abs(grad_p).max()
+        err_sum = np.abs(g_sum.mean(0) - k * grad_p).max() / np.abs(grad_p).max()
+        print(f"[Ex 14] p={p:.2f}, k={k}: weight on grad p  per-prompt average {w_bar:.3f} "
+              f"(exact EM 1/p = {1 / p:.3f}), sum / k 1.000, GRPO 1/sqrt(p(1-p)) {1 / math.sqrt(p * (1 - p)):.3f};"
+              f"  Monte Carlo ({n_groups} groups) relative error: average {err_bar:.4f}, sum {err_sum:.4f}")
+
+
 # ---------------------------------------------------------------------------------------
 # Coding exercises on the toy RLHF pipeline
 # ---------------------------------------------------------------------------------------
@@ -243,6 +277,7 @@ def main():
     ex8_length_bias()
     ex9_rloo_and_std()
     ex10_k3_gradient()
+    ex14_expert_iteration(40_000 if args.quick else 400_000)
     coding_exercises(args.quick)
     print(f"Total time {time.time() - t0:.1f}s")
 

@@ -30,6 +30,12 @@ What runs (all variants share one update routine; only the knobs differ, Algorit
                                                   dynamic sampling (drop all-0 / all-1 groups), no KL
   GRPO+PRM    process rewards: each step is checked locally (is s_k = s_{k-1} + d_k mod 10?);
               advantages are DeepSeekMath's process-supervision advantages (Section 11)
+  Filtered SFT          expert iteration / rejection-sampling fine-tuning (Section 9.5): maximum
+                        likelihood on the correct responses only, summed over kept responses and
+                        divided by the number drawn.  Its expected gradient is that of REINFORCE
+                        with a 0/1 reward and no baseline (weight 1 on grad p(x) per prompt)
+  Filtered SFT, per prompt   the same, but each prompt's correct responses are averaged (an EM
+                        M-step on log p(success | x)): weight about 1/p(x) per prompt
   Two ablations that separate the KL term from the normalisations:
   GRPO, beta=0          GRPO without its KL term (the fair partner of Dr. GRPO)
   Dr. GRPO, beta=0.04   Dr. GRPO with GRPO's KL term.  Without std normalisation its advantages
@@ -37,7 +43,7 @@ What runs (all variants share one update routine; only the knobs differ, Algorit
 Then: pass@k and majority-vote accuracy (test-time compute) for the base and trained models.
 
 Run from the repository root:
-    python code/ch18_rl_for_language_models/grpo_rlvr.py            # full run with figures (~6 min)
+    python code/ch18_rl_for_language_models/grpo_rlvr.py            # full run with figures (~8 min)
     python code/ch18_rl_for_language_models/grpo_rlvr.py --quick    # smoke test, no figures
 """
 from __future__ import annotations
@@ -184,6 +190,11 @@ def outcome_advantages(r, G, kind):
         a = rg - mean
     elif kind == "grpo":     # GRPO: centre and divide by the group's std (eq. 18.25)
         a = (rg - mean) / (rg.std(1, keepdim=True, unbiased=False) + 1e-4)
+    elif kind == "sft":      # filtered SFT: weight 1 on every correct response, 0 on the rest
+        a = rg
+    elif kind == "sft_prompt":  # filtered SFT averaged per prompt: weight G / (#correct) on each
+        a = rg * G / rg.sum(1, keepdim=True).clamp(min=1.0)  # correct one, so a prompt with any
+        #                         success contributes total weight G whatever its success rate
     else:
         raise ValueError(kind)
     return a.reshape(-1)
@@ -216,9 +227,15 @@ METHODS = {
     "Dr. GRPO":  dict(adv="mean", norm="const", clip=(0.2, 0.2), beta=0.0, dyn=False),
     "Dr. GRPO, beta=0.04": dict(adv="mean", norm="const", clip=(0.2, 0.2), beta=0.04, dyn=False),
     "DAPO-lite": dict(adv="grpo", norm="token", clip=(0.2, 0.28), beta=0.0, dyn=True),
+    # expert iteration / filtered SFT (Section 9.5): log-likelihood of the correct responses,
+    # no importance ratio, no clip, no KL; listed before GRPO+PRM so that the test-time-compute
+    # numbers (which use the random state left by the last run) do not depend on them
+    "Filtered SFT": dict(adv="sft", norm="seq_sum", clip=None, beta=0.0, dyn=False),
+    "Filtered SFT, per prompt": dict(adv="sft_prompt", norm="seq_sum", clip=None, beta=0.0, dyn=False),
     "GRPO+PRM":  dict(adv="process", norm="seq_mean", clip=(0.2, 0.2), beta=0.04, dyn=False),
 }
 ABLATIONS = {"GRPO, beta=0", "Dr. GRPO, beta=0.04"}  # drawn dashed in the figure
+SFT_METHODS = {"Filtered SFT", "Filtered SFT, per prompt"}  # reported in Section 9.5, not in the figures
 MAX_REFILLS = 20  # dynamic sampling: cap on refill rounds per update.  Each round leaves a missing
 #                   slot unfilled with probability f (the no-signal fraction), so 20 rounds suffice
 
@@ -252,7 +269,8 @@ def sample_groups(policy, n_prompts, G, g):
 
 
 def take_groups(batch, groups, G):
-    idx = np.concatenate([np.arange(i * G, (i + 1) * G) for i in groups])
+    idx = (np.concatenate([np.arange(i * G, (i + 1) * G) for i in groups]) if len(groups)
+           else np.zeros(0, dtype=np.int64))  # an empty list gives an empty batch (no crash)
     return {k: v[torch.as_tensor(idx)] if torch.is_tensor(v) else v[idx] for k, v in batch.items()}
 
 
@@ -320,7 +338,11 @@ def run_rl(name, base, iters, g, cfg, eval_set, log_every=0):
                 ci, yi, mi, ai = c[idx], y[idx], m[idx], adv[idx]
                 logp = token_logprobs(policy, ci, yi, mi)
                 ratio = torch.exp(logp - logp_old[idx])
-                if knobs["clip"] is None:
+                if knobs["adv"] in ("sft", "sft_prompt"):
+                    # filtered SFT: plain log-likelihood of the kept (correct) responses.  No ratio:
+                    # later minibatch steps keep maximising log pi on the same data, as SFT does.
+                    surr = logp * ai
+                elif knobs["clip"] is None:
                     # unclipped policy gradient.  On the first minibatch step ratio = 1 and this is
                     # REINFORCE.  On later steps the per-token ratio drops the product of the
                     # prefix ratios, so it is a (biased) off-policy surrogate, not REINFORCE proper.
@@ -350,7 +372,7 @@ def run_rl(name, base, iters, g, cfg, eval_set, log_every=0):
                       per_update=float(np.mean(samp_hist[-cfg["eval_every"]:])))
             curve.append(ev)
             if log_every and (it % log_every == 0 or it == iters - 1):
-                print(f"    {name:<19} it {it:4d}  acc {ev['acc']:.3f}  greedy {ev['greedy']:.3f}  "
+                print(f"    {name:<25} it {it:4d}  acc {ev['acc']:.3f}  greedy {ev['greedy']:.3f}  "
                       f"chain-ok|correct {ev['chain_given_correct']:.3f}  KL {ev['kl']:.2f}  "
                       f"entropy {ev['entropy']:.3f}  degenerate groups {frac_degenerate:.2f}")
     return policy, curve
@@ -435,7 +457,7 @@ def main():
                iters=8 if quick else 200, eval_every=4 if quick else 20,
                n_eval_per_size=20 if quick else 100, tts_samples=16 if quick else 64,
                seeds=1 if quick else 3)
-    methods = ["GRPO", "Dr. GRPO", "DAPO-lite"] if quick else list(METHODS)
+    methods = ["GRPO", "Dr. GRPO", "Filtered SFT, per prompt", "DAPO-lite"] if quick else list(METHODS)
     print(f"seed={args.seed} quick={quick}")
     print("config:", cfg)
     print("methods:", {k: METHODS[k] for k in methods})
@@ -475,7 +497,7 @@ def main():
             if s == 0:
                 finals[mname] = pol
             f = curve[-1]
-            print(f"  {mname:<19} seed {s}: acc {f['acc']:.3f}  greedy {f['greedy']:.3f}  by size "
+            print(f"  {mname:<25} seed {s}: acc {f['acc']:.3f}  greedy {f['greedy']:.3f}  by size "
                   + " ".join(f"{f[f'acc_n{n}']:.2f}" for n in range(N_MIN, N_MAX + 1))
                   + f"  KL {f['kl']:.2f}  entropy {f['entropy']:.3f}  chain-ok|correct "
                     f"{f['chain_given_correct']:.3f}  samples {f['samples']}  [{time.time() - t0:.1f}s]")
@@ -494,20 +516,25 @@ def main():
     print(f"  [{time.time() - t0:.1f}s]")
 
     print("\nSummary (final iterate, mean over seeds of sampled accuracy at temperature 1)")
-    print(f"  {'method':<19} {'acc':>6} {'(min-max)':>12} {'greedy':>7} {'n=6 acc':>8} {'KL':>6} {'entropy':>8}"
+    print(f"  {'method':<25} {'acc':>6} {'(min-max)':>12} {'greedy':>7} {'n=6 acc':>8} {'KL':>6} {'entropy':>8}"
           f" {'chain ok':>9} {'no-signal':>10} {'samples':>8}")
-    print(f"  {'base':<19} {ev0['acc']:>6.3f} {'':>12} {ev0['greedy']:>7.3f} {ev0['acc_n6']:>8.3f} {0.0:>6.2f} "
+    print(f"  {'base':<25} {ev0['acc']:>6.3f} {'':>12} {ev0['greedy']:>7.3f} {ev0['acc_n6']:>8.3f} {0.0:>6.2f} "
           f"{ev0['entropy']:>8.3f} {ev0['chain_given_correct']:>9.3f} {'':>10} {0:>8}")
     for mname in methods:
         fs = [c[-1] for c in curves[mname]]
         accs = [f['acc'] for f in fs]
         # 'no-signal': fraction of groups that were all-correct or all-wrong over the last
         # eval_every iterations (before DAPO's filtering)
-        print(f"  {mname:<19} {np.mean(accs):>6.3f} {f'({min(accs):.3f}-{max(accs):.3f})':>12}"
+        print(f"  {mname:<25} {np.mean(accs):>6.3f} {f'({min(accs):.3f}-{max(accs):.3f})':>12}"
               f" {np.mean([f['greedy'] for f in fs]):>7.3f}"
               f" {np.mean([f['acc_n6'] for f in fs]):>8.3f} {np.mean([f['kl'] for f in fs]):>6.2f}"
               f" {np.mean([f['entropy'] for f in fs]):>8.3f} {np.mean([f['chain_given_correct'] for f in fs]):>9.3f}"
               f" {np.mean([f['degenerate'] for f in fs]):>10.3f} {int(np.mean([f['samples'] for f in fs])):>8}")
+    print("  accuracy by problem size n = 2..6 (mean over seeds):")
+    print(f"  {'base':<25} " + " ".join(f"{ev0[f'acc_n{n}']:.3f}" for n in range(N_MIN, N_MAX + 1)))
+    for mname in methods:
+        print(f"  {mname:<25} " + " ".join(f"{np.mean([c[-1][f'acc_n{n}'] for c in curves[mname]]):.3f}"
+                                         for n in range(N_MIN, N_MAX + 1)))
     print("  first evaluation (after one update): no-signal fraction "
           + ", ".join(f"{m} {np.mean([c[0]['degenerate'] for c in curves[m]]):.2f}" for m in methods))
     # accuracy of each method at the sample budget of the non-filtering methods (for DAPO-lite)
@@ -531,8 +558,10 @@ def main():
 
 def make_figures(curves, tts, ev0, ks):
     os.makedirs(FIG_DIR, exist_ok=True)
-    colors = dict(zip(METHODS, ["0.5", "tab:brown", "tab:blue", "tab:blue", "tab:orange", "tab:orange",
-                                "tab:green", "tab:purple"]))
+    colors = {"REINFORCE": "0.5", "RLOO": "tab:brown", "GRPO": "tab:blue", "GRPO, beta=0": "tab:blue",
+              "Dr. GRPO": "tab:orange", "Dr. GRPO, beta=0.04": "tab:orange", "DAPO-lite": "tab:green",
+              "GRPO+PRM": "tab:purple"}
+    curves = {k: v for k, v in curves.items() if k not in SFT_METHODS}  # Section 9.5 reports these
     fig, axes = plt.subplots(1, 4, figsize=(17, 4))
     for mname, cl in curves.items():
         # x axis: responses sampled so far (DAPO's dynamic sampling draws extra groups)

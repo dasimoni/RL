@@ -20,10 +20,10 @@ Every method searches with a Gaussian over theta, starts from N(theta_0, I) with
 and spends N = 50 rollouts per iteration (budget 4,000 rollouts = 80 iterations):
 
   reps   Episodic REPS (Peters, Mulling & Altun, 2010). E-step: weights q_i ∝ exp(R_i / eta*), with eta*
-         minimizing the convex dual g(eta) = eta eps + eta log (1/N) sum_i exp(R_i / eta) (Eq. 12.37),
+         minimizing the convex dual g(eta) = eta eps + eta log (1/N) sum_i exp(R_i / eta) (Eq. 12.36),
          solved with scipy.optimize (L-BFGS-B on log eta, exact gradient eta (eps - KL)).  Check: the
          sample KL(q || uniform) equals eps at eta*.  M-step: weighted maximum likelihood of a
-         diagonal Gaussian. eps in {0.5, 1, 2}.
+         diagonal Gaussian (Eq. 12.37). eps in {0.5, 1, 2}.
   rwr    the same E- and M-step with a FIXED temperature eta in {1, 10, 100, 1000} (reward-weighted
          regression; Dayan & Hinton, 1997; Peters & Schaal, 2007).
   cem    the same M-step with uniform weights on the K = 25 best of the N samples (cross-entropy method).
@@ -32,14 +32,19 @@ and spends N = 50 rollouts per iteration (budget 4,000 rollouts = 80 iterations)
          rank shaping are imported from code/ch10_policy_gradients/black_box_search.py, whose
          CartPole loop is written inline and so cannot be imported as a whole.
 
-Settings chosen once on pilot seeds 100-105 (not the reported seeds): ES sigma = 0.03 and Adam lr 0.1
-(best of sigma in {0.03, 0.1, 0.3} x lr in {0.03, 0.1, 0.3}), CEM K = 25 (best of K in {5, 10, 25}).
+Settings chosen once on pilot seeds 100-105 (not the reported seeds), by the median cost of the search
+mean after 4,000 rollouts: ES sigma = 0.03 and Adam lr 0.1 (best of sigma in {0.03, 0.1, 0.3} x lr in
+{0.03, 0.1, 0.3}), CEM K = 25 (best of K in {5, 10, 25}). `--pilot` reruns that grid and prints it.
 Performance is the cost of the MEAN of the search distribution, evaluated by one extra rollout that does
-not count towards the budget. Reported: median and interquartile range over the seeds.
+not count towards the budget. Reported: median and interquartile range over the seeds, and how many
+seeds were still improving at the end. Parts A and C compare eta*/std(R) with its value for normally
+distributed returns, both in the population (1/sqrt(2 eps)) and for batches of 50 normal samples
+(Exercise 16).
 
 Run (from the repository root):
   python code/ch12_continuous_control_actor_critic/episodic_reps.py           # full: 20 seeds, figure
   python code/ch12_continuous_control_actor_critic/episodic_reps.py --quick   # 3 seeds, 1,000 rollouts, no figure
+  python code/ch12_continuous_control_actor_critic/episodic_reps.py --pilot   # the ES / CEM tuning grid only
 """
 from __future__ import annotations
 
@@ -48,9 +53,13 @@ import importlib.util
 import os
 import time
 
-import numpy as np
-from scipy.optimize import minimize
-from scipy.special import logsumexp
+for _v in ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS"):     # one CPU thread
+    os.environ.setdefault(_v, "1")
+
+import numpy as np  # noqa: E402
+from scipy.optimize import minimize  # noqa: E402
+from scipy.special import logsumexp  # noqa: E402
+from scipy.stats import skew  # noqa: E402
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 FIG_DIR = os.path.join(HERE, "figures")
@@ -161,6 +170,17 @@ def reps_weights(R, eps):
     return eta_u * s, q, kl, Rmax + s * float(res.fun)
 
 
+def normal_ratio(eps, n_batches, seed=12345):
+    """Median of eta*/std(R) over batches of N_SAMPLES i.i.d. normal returns: the finite-N reference for
+    the population value 1/sqrt(2 eps) of Exercise 16(d)."""
+    rng = np.random.default_rng(seed)
+    r = []
+    for _ in range(n_batches):
+        R = rng.standard_normal(N_SAMPLES)
+        r.append(reps_weights(R, eps)[0] / R.std())
+    return float(np.median(r))
+
+
 def gauss_kl_diag(m1, v1, m0, v0):
     """KL(N(m1, diag v1) || N(m0, diag v0))."""
     return 0.5 * float(np.sum(v1 / v0 + (m0 - m1) ** 2 / v0 - 1 + np.log(v0 / v1)))
@@ -175,20 +195,20 @@ CEM_ELITES = 25
 VAR_FLOOR = 1e-300                                                     # keeps a collapsed Gaussian finite
 
 
-def run(method, seed, budget, eps=1.0, eta=10.0):
+def run(method, seed, budget, eps=1.0, eta=10.0, sigma=ES_SIGMA, lr=ES_LR, elites=CEM_ELITES):
     """One run; returns a dict with the cost of the mean after every iteration and diagnostics."""
     rng = np.random.default_rng(seed)
     N = N_SAMPLES
     m, v = THETA0.copy(), np.ones(D)
     cost = [-returns(m)[0]]
-    diag = dict(eta=[], kl=[], dual_gap=[], gauss_kl=[], ess=[], std_R=[], sd=[])
-    opt = Adam(ES_LR)
+    diag = dict(eta=[], kl=[], dual_gap=[], gauss_kl=[], ess=[], std_R=[], skew_R=[], sd=[])
+    opt = Adam(lr)
     for _ in range(budget // N):
         if method == "es":                                             # Algorithm 10.9, antithetic
             xi = rng.standard_normal((N // 2, D))
-            R = returns(np.concatenate([m + ES_SIGMA * xi, m - ES_SIGMA * xi]))
+            R = returns(np.concatenate([m + sigma * xi, m - sigma * xi]))
             u = centred_ranks(R)
-            grad = ((u[:N // 2] - u[N // 2:])[:, None] * xi).sum(0) / (N * ES_SIGMA)
+            grad = ((u[:N // 2] - u[N // 2:])[:, None] * xi).sum(0) / (N * sigma)
             m = m + opt.step(grad)
         else:
             X = m + np.sqrt(v) * rng.standard_normal((N, D))
@@ -199,12 +219,13 @@ def run(method, seed, budget, eps=1.0, eta=10.0):
                 diag["kl"].append(kl)
                 diag["dual_gap"].append(gval - float(q @ R))           # strong duality: g(eta*) = E_q[R]
                 diag["std_R"].append(R.std())
+                diag["skew_R"].append(skew(R) if R.std() > 0 else 0.0)
             elif method == "rwr":
                 a = (R - R.max()) / eta
                 q = np.exp(a - logsumexp(a))
             elif method == "cem":
                 q = np.zeros(N)
-                q[np.argsort(-R, kind="stable")[:CEM_ELITES]] = 1.0 / CEM_ELITES
+                q[np.argsort(-R, kind="stable")[:elites]] = 1.0 / elites
             m_new = q @ X                                              # weighted maximum likelihood
             v_new = np.maximum(q @ (X - m_new) ** 2, VAR_FLOOR)
             diag["gauss_kl"].append(gauss_kl_diag(m_new, v_new, m, v))
@@ -220,13 +241,33 @@ def fmt_iqr(x):
     return f"{med:9.3f} [{q1:.3g}, {q3:.3g}]"
 
 
+def pilot(quick):
+    """The tuning grid for ES and CEM on pilot seeds 100-105 (never the reported seeds)."""
+    seeds, budget = (range(100, 102), 1000) if quick else (range(100, 106), 4000)
+    print(f"Pilot grid on seeds {seeds[0]}..{seeds[-1]}: median cost of the search mean after {budget} rollouts")
+    for sigma in (0.03, 0.1, 0.3):
+        row = []
+        for lr in (0.03, 0.1, 0.3):
+            c = np.median([run("es", s, budget, sigma=sigma, lr=lr)["cost"][-1] for s in seeds])
+            row.append(f"lr={lr:<4}: {c:9.3f}")
+        print(f"  ES  sigma={sigma:<4}  " + "   ".join(row))
+    for k in (5, 10, 25):
+        c = np.median([run("cem", s, budget, elites=k)["cost"][-1] for s in seeds])
+        print(f"  CEM K={k:<3}  {c:9.3f}")
+
+
 # ----------------------------------------------------------------------------------------------
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--quick", action="store_true")
+    ap.add_argument("--pilot", action="store_true", help="only rerun the ES / CEM tuning grid")
     ap.add_argument("--seed", type=int, default=0, help="first seed")
     args = ap.parse_args()
     t0 = time.time()
+    if args.pilot:
+        pilot(args.quick)
+        print(f"\nTotal time {time.time() - t0:.0f}s")
+        return
     n_seeds, budget = (3, 1000) if args.quick else (20, 4000)
     seeds = list(range(args.seed, args.seed + n_seeds))
     print(f"seeds {seeds[0]}..{seeds[-1]}  mode={'quick' if args.quick else 'full'}  d={D}  "
@@ -237,11 +278,14 @@ def main():
     R0 = returns(THETA0 + rng.standard_normal((N_SAMPLES, D)))
     print("\nPart A: the REPS dual on the first batch (N = 50 samples from N(theta_0, I))")
     print(f"  returns: mean {R0.mean():.1f}, std {R0.std():.1f}, best {R0.max():.1f}")
+    n_ref = 100 if args.quick else 400
+    ref_ratio = {eps: normal_ratio(eps, n_ref) for eps in (0.5, 1.0, 2.0)}
     for eps in (0.5, 1.0, 2.0):
         e, q, kl, gval = reps_weights(R0, eps)
         print(f"  eps={eps:3.1f}: eta*={e:9.2f}  sample KL(q||p)={kl:.8f}  ESS={1 / (q @ q):5.1f}  "
-              f"g(eta*)={gval:.4f}  E_q[R]={q @ R0:.4f}  "
-              f"eta*/std(R)={e / R0.std():.3f} (Gaussian returns: 1/sqrt(2 eps)={1 / np.sqrt(2 * eps):.3f})")
+              f"g(eta*)={gval:.4f}  E_q[R]={q @ R0:.4f}  eta*/std(R)={e / R0.std():.3f}")
+        print(f"           normal returns: 1/sqrt(2 eps)={1 / np.sqrt(2 * eps):.3f} in the population, "
+              f"median {ref_ratio[eps]:.3f} for batches of {N_SAMPLES} normal samples ({n_ref} batches)")
     print(f"  (KL(q||p) <= log N = {np.log(N_SAMPLES):.3f} for any weights, so eps must be below it)")
 
     # ---- Part B: learning curves ----------------------------------------------------------------
@@ -255,12 +299,16 @@ def main():
         results[name] = [run(method, s, budget, **kw) for s in seeds]
     checkpoints = [c for c in (500, 1000, 2000, 4000) if c <= budget]
     print("\nPart B: cost -R of the search mean, median [IQR] over seeds, by rollouts used")
-    print(f"  {'method':14s}" + "".join(f"{c:>26d}" for c in checkpoints) + "   final sd of search dist.")
+    print(f"  {'method':14s}" + "".join(f"{c:>26d}" for c in checkpoints)
+          + "   final sd of search dist.   still improving*")
+    back = min(1000, budget) // N_SAMPLES
     for name, runs in results.items():
         C = np.array([r["cost"] for r in runs])
         row = "".join(f"{fmt_iqr(C[:, c // N_SAMPLES]):>26s}" for c in checkpoints)
         sd = np.median([r["sd"][-1] for r in runs]) if runs[0]["sd"].size else ES_SIGMA
-        print(f"  {name:14s}{row}   {sd:.2g}")
+        impr = int(np.sum(C[:, -1] < 0.99 * C[:, -1 - back]))
+        print(f"  {name:14s}{row}   {sd:<26.2g}   {impr}/{len(runs)}")
+    print(f"  * seeds whose cost fell by more than 1% over the last {back * N_SAMPLES} rollouts")
     for name in ("RWR eta=1", "RWR eta=10"):
         it = [int(np.argmax(np.array(r["sd"]) < 1e-3)) + 1 if np.min(r["sd"]) < 1e-3 else None
               for r in results[name]]
@@ -284,9 +332,17 @@ def main():
               f"max |g(eta*) - E_q[R]| = {np.abs(gap).max():.1e};  median ESS {np.median(ess):.1f} of {N_SAMPLES}")
         print(f"      eta*: median {np.median(eta[:, 0]):.3g} at iteration 1 -> {np.median(eta[:, -1]):.3g} "
               f"at the last;  eta*/std(R): median {np.median(ratio):.3f} [{np.percentile(ratio, 25):.3f}, "
-              f"{np.percentile(ratio, 75):.3f}] (Gaussian returns: {1 / np.sqrt(2 * eps):.3f})")
+              f"{np.percentile(ratio, 75):.3f}] (normal returns: {1 / np.sqrt(2 * eps):.3f}; "
+              f"{ref_ratio[eps]:.3f} for {N_SAMPLES} normal samples)")
         print(f"      KL(p_new || p_old) of the FITTED Gaussians: median {np.median(gk):.2f}, "
               f"90th percentile {np.percentile(gk, 90):.2f}  (bound on the samples: {eps})")
+        sk = np.array([r["skew_R"] for r in runs])
+        rt = np.array([r["eta"] / np.maximum(r["std_R"], 1e-300) for r in runs])
+        half = sk.shape[1] // 2
+        print(f"      skewness of the batch returns, median: iteration 1 {np.median(sk[:, 0]):.2f}, "
+              f"iterations 2-{half} {np.median(sk[:, 1:half]):.2f}, {half + 1}-{sk.shape[1]} "
+              f"{np.median(sk[:, half:]):.2f};  eta*/std(R) in the same windows: {np.median(rt[:, 0]):.3f}, "
+              f"{np.median(rt[:, 1:half]):.3f}, {np.median(rt[:, half:]):.3f}")
 
     # ---- reference optimum ------------------------------------------------------------------------
     finals = [(r["cost"][-1], r["m"]) for runs in results.values() for r in runs]

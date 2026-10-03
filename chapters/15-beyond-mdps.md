@@ -4,15 +4,17 @@
 
 ## At a glance
 
-Every algorithm so far has assumed the same contract. The agent sees a Markov state, it optimizes one fixed reward, it acts one primitive step at a time, and it faces one fixed MDP. Real problems break each clause. A robot's camera does not show what is behind it. A household robot is asked to fetch a *different* object every day. Nobody plans a trip to another city in muscle twitches. A recommender system meets a new user every second and has to adapt within a handful of interactions. This chapter relaxes the four assumptions one at a time. Each relaxation turns out to be a small change to the MDP tuple, and the solution in each case reuses the machinery of earlier chapters on a cleverly enlarged state, action or task space.
+Every algorithm so far has assumed the same contract. The agent sees a Markov state, it optimizes one fixed reward, it acts one primitive step at a time, and it faces one fixed MDP. Real problems break each clause. A robot's camera does not show what is behind it. A household robot is asked to fetch a *different* object every day. Nobody plans a trip to another city in muscle twitches. A recommender system meets a new user every second and has to adapt within a handful of interactions. This chapter relaxes these assumptions one at a time, and two more besides: that the task is specified by one scalar, Markov reward, and that the environments seen in training are the ones met at test time. Each relaxation turns out to be a small change to the MDP tuple, and the solution in each case reuses the machinery of earlier chapters on a cleverly enlarged state, action or task space.
 
 | Assumption of the standard MDP | Relaxation | Key object | Section |
 |---|---|---|---|
 | the agent observes the state | **POMDP**: it sees an observation $O_t$ drawn from $\mathcal{O}(o \mid s', a)$ | belief $b_t$; memory | 2–3 |
 | one fixed reward | **goal-conditioned RL**: a family of rewards $r_g$ | UVFA $Q(s,a,g)$; hindsight relabelling | 4 |
+| one scalar, Markov reward | **multi-objective RL**; non-Markov task specifications | Pareto front, convex coverage set; reward machines | 6.7 |
 | one primitive step per decision | **hierarchy**: temporally extended actions | options $\omega = (\mathcal{I}_\omega, \pi_\omega, \beta_\omega)$; semi-MDPs | 5 |
-| one task | **transfer and meta-RL**: a distribution over MDPs | successor features and GPI; RL², MAML, PEARL; Bayes-adaptive MDPs | 6–8 |
+| one task | **transfer and meta-RL**: a distribution over MDPs | successor features and GPI; forward-backward representations; RL², MAML, PEARL; Bayes-adaptive MDPs | 6–8 |
 | a stationary world | **continual RL** | plasticity | 9 |
+| training MDPs = test MDPs | **generalization across environments**: contextual MDPs, environment design | generalization gap; epistemic POMDP; minimax regret, PLR, PAIRED | 10 |
 
 **Learning objectives.** After this chapter you should be able to:
 
@@ -21,12 +23,14 @@ Every algorithm so far has assumed the same contract. The agent sees a Markov st
 3. Explain when frame stacking suffices and when it does not; describe recurrent value-based and policy-based agents (DRQN, R2D2's stored-state and burn-in tricks) and transformer memories.
 4. Formulate goal-conditioned RL with universal value function approximators, implement Hindsight Experience Replay, and explain precisely why goal relabelling needs an off-policy learner.
 5. Define semi-MDPs and options; derive the multi-time option models and the SMDP Bellman equations; implement SMDP Q-learning and intra-option Q-learning; state the option-critic gradient theorems; describe FeUdal Networks, HIRO and MAXQ, and why discovering good options is hard.
-6. Derive successor representations and successor features, prove the generalized policy improvement (GPI) theorem, and use SFs + GPI for zero-shot transfer.
+6. Derive successor representations and successor features, prove the generalized policy improvement (GPI) theorem, and use SFs + GPI for zero-shot transfer; explain what a representation for transfer should preserve (bisimulation, self-prediction, successor measures) and how forward-backward representations generalize SFs.
 7. Set up meta-RL as learning over a task distribution; explain RL², MAML for RL and PEARL and how they relate to the Bayes-adaptive (Bayes-optimal) policy; describe in-context RL (Algorithm Distillation), continual RL and loss of plasticity.
+8. Define multi-objective MDPs, Pareto fronts and convex coverage sets; explain why linear scalarization misses unsupported policies, how SER and ESR differ, and how reward machines make non-Markov task specifications Markov.
+9. Define contextual MDPs and the generalization gap; explain the epistemic POMDP, domain randomization and minimax-regret environment design (PAIRED, PLR, ACCEL), and measure a generalization gap.
 
 **Prerequisites.** MDPs, Bellman equations and the optimality of Markov policies ([Chapter 01](01-the-rl-problem.md)); value iteration and the contraction argument ([Chapter 03](03-dynamic-programming.md)); Q-learning and off-policy learning ([Chapter 05](05-temporal-difference.md)); DQN and replay ([Chapter 09](09-deep-q-learning.md)); policy gradients and actor-critic ([Chapter 10](10-policy-gradients.md)); bandits and Bayesian (Thompson) reasoning ([Chapter 02](02-multi-armed-bandits.md)); exploration ([Chapter 14](14-exploration.md)). World models that track hidden state (Dreamer's recurrent state-space model) are in [Chapter 13](13-model-based-rl.md); we only point to them here.
 
-**Code you will run** (all in [`code/ch15_beyond_mdps/`](../code/ch15_beyond_mdps/); NumPy, plus small PyTorch networks for HER and RL²; one CPU thread):
+**Code you will run** (all in [`code/ch15_beyond_mdps/`](../code/ch15_beyond_mdps/); NumPy, plus small PyTorch networks for HER, FB, RL² and the maze agent; one CPU thread):
 
 | Script | What it shows | Full run |
 |---|---|---|
@@ -34,10 +38,13 @@ Every algorithm so far has assumed the same contract. The agent sees a Markov st
 | [`her_bitflip.py`](../code/ch15_beyond_mdps/her_bitflip.py) | DQN with and without HER on bit flipping, $n = 5 \dots 20$; relabelling strategies | 5.5 min |
 | [`four_rooms_options.py`](../code/ch15_beyond_mdps/four_rooms_options.py) | Four-rooms with hallway options: exact option models, SMDP value iteration, SMDP and intra-option Q-learning, learning about options that are never executed | 45 s |
 | [`successor_features_gpi.py`](../code/ch15_beyond_mdps/successor_features_gpi.py) | Successor representation and its eigenvectors; successor features + GPI transfer on 500 new tasks | 13 s |
+| [`fb_zero_shot.py`](../code/ch15_beyond_mdps/fb_zero_shot.py) | Forward-backward representations learned without reward vs SF + GPI, zero-shot on unseen rewards | 5.1 min |
+| [`deep_sea_treasure.py`](../code/ch15_beyond_mdps/deep_sea_treasure.py) | Deep Sea Treasure: Pareto front, linear scalarization, OLS + SFs + GPI, mixture policies under SER and ESR | 7 s |
 | [`rl2_bandits.py`](../code/ch15_beyond_mdps/rl2_bandits.py) | RL²: a GRU meta-learned on bandit tasks, compared with UCB, Thompson sampling and the exact Bayes-optimal policy | 3.9 min |
-| [`exercise_solutions.py`](../code/ch15_beyond_mdps/exercise_solutions.py) | Numerical checks of the exercise solutions | 84 s |
+| [`procgen_lite.py`](../code/ch15_beyond_mdps/procgen_lite.py) | PPO on procedurally generated mazes: generalization gap against the number of training levels; uniform vs prioritized level replay | 6 min |
+| [`exercise_solutions.py`](../code/ch15_beyond_mdps/exercise_solutions.py) | Numerical checks of the exercise solutions | 61 s |
 
-**Study time.** About 12–14 hours: 7 for the text and derivations, 2 to run and modify the code, 4–5 for the exercises.
+**Study time.** About 15–17 hours: 9 for the text and derivations, 2.5 to run and modify the code, 5–6 for the exercises.
 
 **Notation.** We follow [NOTATION.md](../NOTATION.md). Chapter-specific symbols: $O_t$ is the observation emitted with $S_t$, $\mathcal{O}(o \mid s', a)$ the observation kernel, and $\mathcal{Z}$ the **set** of observations (we do not use $\mathcal{O}$ for the set, because it names the kernel). $b_t(s)$ is the belief (here, never the behaviour policy; when we need a behaviour policy we write $\mu$, and $\mu$ means nothing else in this chapter). $\Delta(\mathcal{S})$ is the probability simplex over $\mathcal{S}$. $g \in \mathcal{G}$ is a goal. An option is $\omega = (\mathcal{I}_\omega, \pi_\omega, \beta_\omega)$, $\Omega$ is a set of options, $\Omega(s)$ those available in $s$, and $\pi_\Omega(\omega \mid s)$ a policy over options (following Bacon et al., 2017; Sutton, Precup & Singh write $\mathcal{O}$ for the option set and $\mu$ for the policy over options). $\boldsymbol\phi$ and $\boldsymbol\psi$ are features and successor features, and $\mathbf{M}$ the successor-representation matrix. A task (an MDP drawn from a distribution) is $\mathcal{M}$, the task distribution is $p(\mathcal{M})$.
 
@@ -47,6 +54,8 @@ Departures from NOTATION.md and local meanings, flagged once here:
 * The belief MDP's reward and transition kernel are $\bar r(b, a)$ and $\bar p(b' \mid b, a)$. $\Pr(o \mid b, a)$, with parentheses, is the observation likelihood viewed as a function of $(o, b, a)$; braces, $\Pr\lbrace\cdot\rbrace$, denote the probability of an event.
 * $\tau$ is only the Polyak coefficient (Algorithm 15.3), as in NOTATION.md's deep-RL convention.
 * $\boldsymbol\psi$ is reserved for successor features (NOTATION.md uses it for the parameters of a learned model, which this chapter never needs to name). In Section 6, $\mathbf{w}$ is the task vector of successor features (following Barreto et al., 2017); elsewhere it is a set of network weights.
+* $\epsilon$ (not $\varepsilon$) is a tolerance: the goal-achievement tolerance in (15.13), the pruning tolerance of $\epsilon$-pruning (Section 2.5) and the value-approximation error in the GPI theorem (Section 6.3). $\varepsilon$ remains the exploration rate (NOTATION.md reserves $\epsilon$ for PPO's clipping range, which this chapter never uses).
+* Sections 6.6, 6.7 and 10 add local symbols. $d_{\mathrm{bis}}$ is the bisimulation metric and $W_1$ the Wasserstein-1 distance. $F$, $B$ and $\mathbf{z}$ are the forward embedding, backward embedding and task vector of FB representations (as in Touati & Ollivier, 2021), $d$ their dimension, and $\nu$ their data distribution (the paper's $\rho$, which NOTATION.md reserves for importance ratios). In multi-objective RL, $\mathbf{r}$ (random version $\mathbf{R}_{t+1}$), $\mathbf{G}$ and $\mathbf{V}^\pi$ are the vector reward, return and value (these bold capitals are vectors of objective values, not matrices), $U$ is a utility, $m$ the number of objectives, $u$ a reward-machine state and $L(s, a, s')$ its labelling function. In Section 10, $c$ is the context of a contextual MDP, $\Delta(\hat\pi)$ the generalization gap (unrelated to the simplex $\Delta(\mathcal{S})$), and $\beta_{\text{PLR}}$, $\rho_{\text{PLR}}$ are PLR's temperature and staleness weight.
 * $\beta_\omega$ is a termination function. MAML's outer step size is $\eta$ and PEARL's KL weight is $\kappa$ (not $\beta$ and $\lambda$, which NOTATION.md uses for other things).
 * A few symbols are reused locally and redefined where they appear: $k$ (relabelled goals per transition, an option's duration, a window length), $K$ (an option's random duration, trajectories per task in MAML), $L$ (a context length), $c$ (the net growl count, the manager's horizon in FuN and HIRO, the optimum of a quadratic task), $m$ (the achieved-goal map, R2D2's sequence length, a posterior mean), and $\boldsymbol\phi$ (features in Section 6, the parameters of PEARL's encoder in Section 7.5, as in the paper).
 
@@ -67,6 +76,8 @@ The fixes all share one move: **enlarge something until the standard theory appl
 * Goals: enlarge the state to the pair $(s, g)$. The goal-augmented process is an ordinary MDP whose reward depends on part of the state that never changes. Hindsight relabelling exploits the fact that one trajectory is valid data for many goals (Section 4).
 * Hierarchy: enlarge the action set with temporally extended **options**. The resulting decision process is a semi-MDP, which has its own Bellman equations (Section 5).
 * Transfer and meta-learning: treat the *task identity* as an unobserved part of the state. A distribution over MDPs is then a single POMDP, the Bayes-adaptive MDP, and fast adaptation is just acting well under uncertainty about this hidden variable (Section 7). This closes the loop with Section 2, and it is why the chapter starts with POMDPs.
+
+Two more clauses of the contract are relaxed later, by the same move. A task that no Markov scalar reward expresses becomes Markov on the product of the state and the state of a *reward machine*, and a vector of objectives is handled by a set of policies, one for each trade-off (Section 6.7). When test environments differ from training ones, the unobserved context of the environment becomes part of the hidden state, and generalizing means acting well in what is then a POMDP, the *epistemic POMDP* (Section 10).
 
 ---
 
@@ -310,7 +321,7 @@ $$
 
 Exact pruning keeps 5 of the 27.
 
-**What the script finds.** The figure below shows the results of `tiger_pomdp.py`, whose `prune` computes an exact upper envelope of lines (with two hidden states each $\boldsymbol\alpha^\top\mathbf{b}$ is a line in $b(\text{TL})$). With exact pruning, $|\Gamma_n|$ for $n = 1, \dots, 10$ is $3, 5, 9, 7, 13, 15, 19, 25, 27, 27$, and it keeps growing, to 190 vectors at $n = 40$, where one unpruned backup would create 96,123. The vectors that accumulate differ only in what they plan to do dozens of steps ahead, so their values differ by tiny amounts. Practical solvers therefore use **$\varepsilon$-pruning**: drop a vector if removing it lowers the envelope by less than $\varepsilon$ anywhere. With $\varepsilon = 10^{-6}$, value iteration converges (residual $9.9 \times 10^{-11}$) after 451 backups, with never more than 65 vectors, to exactly **9** vectors:
+**What the script finds.** The figure below shows the results of `tiger_pomdp.py`, whose `prune` computes an exact upper envelope of lines (with two hidden states each $\boldsymbol\alpha^\top\mathbf{b}$ is a line in $b(\text{TL})$). With exact pruning, $|\Gamma_n|$ for $n = 1, \dots, 10$ is $3, 5, 9, 7, 13, 15, 19, 25, 27, 27$, and it keeps growing, to 190 vectors at $n = 40$, where one unpruned backup would create 96,123. The vectors that accumulate differ only in what they plan to do dozens of steps ahead, so their values differ by tiny amounts. Practical solvers therefore use **$\epsilon$-pruning**: drop a vector if removing it lowers the envelope by less than $\epsilon$ anywhere. With $\epsilon = 10^{-6}$, value iteration converges (residual $9.9 \times 10^{-11}$) after 451 backups, with never more than 65 vectors, to exactly **9** vectors:
 
 | $\alpha(\text{TL})$ | $\alpha(\text{TR})$ | root action |
 |---|---|---|
@@ -430,7 +441,7 @@ A transformer over the last $L$ steps is a *learned, content-addressable* window
 
 A recurrent state trained only by the RL loss is pushed to keep whatever helps reduce that loss, which with sparse rewards may be very little. Three ideas make memory more belief-like:
 
-* **Auxiliary prediction.** Train the state to predict future observations and rewards. A state that predicts all future observations is a sufficient statistic; this is the idea of predictive state representations (Littman, Sutton & Singh, 2001), and it is what world models such as Dreamer's recurrent state-space model do ([Chapter 13](13-model-based-rl.md)).
+* **Auxiliary prediction.** Train the state to predict future observations and rewards. A state that predicts all future observations is a sufficient statistic; this is the idea of predictive state representations (Littman, Sutton & Singh, 2001), and it is what world models such as Dreamer's recurrent state-space model do ([Chapter 13](13-model-based-rl.md)). Predicting the agent's own next *latent* state instead of the next observation is cheaper and works too; Section 6.6 explains why such self-predictive objectives do not collapse and when they recover a Markov state.
 * **Asymmetric actor-critic.** In simulation the true state is available during training. A critic that sees $S_t$ while the actor sees only observations gives the actor a lower-variance learning signal without making the deployed policy depend on privileged information (Pinto et al., 2018). Caveat: a critic $V(s_t)$ of the state alone is not the value of a policy that acts on histories, so in genuinely partially observable tasks (Tiger, where the right action depends on the belief) it biases the policy gradient. Conditioning the critic on both the history (or recurrent state) and the true state, $V(h_t, s_t)$, removes the bias (Baisero & Amato, 2022).
 * **Less bootstrapping.** TD targets bootstrap from the value of the next *observation* (or recurrent state); if that is aliased, the target is biased. Monte Carlo or $\lambda$-returns depend less on the Markov property ([Chapter 06](06-n-step-and-eligibility-traces.md)).
 
@@ -992,6 +1003,77 @@ When exactly one object is attractive, its base policy is essentially optimal (m
 
 SFs require rewards (approximately) linear in known features, and they are policy-specific: a library must contain good policies for the kinds of tasks that will come. Deep versions learn $\boldsymbol\phi$ and $\boldsymbol\psi$ with neural networks (Barreto et al., 2018), and universal successor feature approximators condition $\boldsymbol\psi$ on the task vector itself, $\boldsymbol\psi(s, a, \mathbf{w})$, combining SFs with the UVFA idea of Section 4 (Borsa et al., 2019).
 
+### 6.6 Learned representations for transfer: from successor features to zero-shot RL
+
+Successor features work when someone supplies features $\boldsymbol\phi$ in which every future reward is linear. In Section 6.4 we chose "which object was touched" because we knew the tasks. What should a *learned* representation keep when the tasks are not known in advance? There are three answers, in increasing order of ambition.
+
+**Keep what determines rewards and dynamics: bisimulation.** Two states are *bisimilar* if they earn the same rewards and move, with the same probabilities, into equivalent states (Givan, Dean & Greig, 2003). Ferns, Panangaden & Precup (2004) relaxed this equivalence to a metric. With the weighting used here (they allow others), it is the fixed point of
+
+$$
+d_{\mathrm{bis}}(s, t) = \max_a \Big[\, |r(s, a) - r(t, a)| + \gamma\, W_1\big(p(\cdot \mid s, a),\, p(\cdot \mid t, a);\, d_{\mathrm{bis}}\big) \Big],
+\tag{15.29a}
+$$
+
+where $W_1(\cdot, \cdot\,; d)$ is the Wasserstein-1 (earth mover's) distance with ground metric $d$. The right-hand side is a $\gamma$-contraction in $d$, so the fixed point exists and is unique. It bounds value differences, $|v_\ast(s) - v_\ast(t)| \le d_{\mathrm{bis}}(s, t)$ (Exercise 16), so states that are close can be merged at little cost in value. DeepMDP (Gelada et al., 2019) learns a latent space by predicting rewards and next latent states, and bounds the value lost by acting on the latent with these two losses. Deep bisimulation for control (DBC; Zhang et al., 2021) trains an encoder so that $\ell_1$ distances between embeddings match an on-policy version of (15.29a), estimated with a learned latent model. Both discard detail that affects neither rewards nor dynamics, such as a video playing in the background, which a pixel-reconstruction objective must keep. The price is that the metric depends on the reward, so the representation is tailored to one task.
+
+**Keep what predicts itself: self-predictive representations.** SPR ([Chapter 09](09-deep-q-learning.md), Section 12) and TD-MPC ([Chapter 13](13-model-based-rl.md), Section 7.6) train an encoder and a latent transition model so that the prediction made from $(s_t, a_t)$ matches the embedding of $s_{t+1}$. That embedding is computed by a slowly moving (exponential-moving-average) copy of the encoder, with the gradient stopped. A constant encoder predicts itself perfectly, so why does the representation not collapse? Tang et al. (2023) analysed the learning dynamics in an idealized linear setting. The semi-gradient (stop-gradient) update and a predictor that is optimized faster than the encoder prevent collapse, and the dynamics then perform a spectral decomposition of the transition matrix, the structure that the SR eigenvectors of Section 6.1 exposed. Ni et al. (2024) showed that many state and history abstractions rest on the same self-predictive condition. An encoder that predicts the reward and its own next latent is sufficient to represent the optimal values, and applied to histories it yields a Markov, belief-like state. This is the formal version of the auxiliary-prediction advice of Section 3.5.
+
+**Keep what evaluates every reward: successor measures.** The most ambitious answer generalizes the SR to large state spaces. The **successor measure** of $\pi$, $M^\pi(s, a, X) = \sum_{t \ge 0} \gamma^t \Pr\lbrace S_{t+1} \in X \mid S_0 = s, A_0 = a, \pi\rbrace$, gives $q^\pi_r(s, a) = \int M^\pi(s, a, \mathrm{d}s')\, r(s')$ for *every* reward $r(s')$ that depends on the next state. It is the shifted SR of Section 6.2, conditioned on the first action. Two methods learn it from reward-free data.
+
+*Contrastive RL* (Eysenbach, Zhang, Salakhutdinov & Levine, 2022) trains a two-stream critic $f(s, a, g) = \boldsymbol\phi(s, a)^\top \boldsymbol\psi(g)$, the UVFA factorization of Section 4.2, on a classification task. A positive pair is $(s, a)$ with a state $g$ visited later in the same trajectory, after a geometrically distributed delay; a negative pair takes $g$ from the marginal $p(g)$ of the data. With a binary cross-entropy loss and equally many positives and negatives, the optimal critic is $f(s, a, g) = \log\big[p^\pi_\gamma(g \mid s, a) / p(g)\big]$, where $p^\pi_\gamma = (1 - \gamma) M^\pi$ is the normalized discounted occupancy. The value of "reach $g$" is proportional to $p^\pi_\gamma(g \mid s, a)$, so $f$ is a goal-conditioned Q-function learned without ever writing down a reward, and the actor maximizes $f(s, a, g)$.
+
+*Forward-backward representations* (FB; Touati & Ollivier, 2021) learn successor measures for a whole family of policies at once. FB learns a backward embedding $B(s') \in \mathbb{R}^d$ and, for every task vector $\mathbf{z} \in \mathbb{R}^d$, a forward embedding $F(s, a, \mathbf{z}) \in \mathbb{R}^d$, such that
+
+$$
+M^{\pi_{\mathbf{z}}}(s, a, \mathrm{d}s') \approx F(s, a, \mathbf{z})^\top B(s')\, \nu(\mathrm{d}s'), \qquad \pi_{\mathbf{z}}(s) = \mathop{\mathrm{arg\,max}}_a F(s, a, \mathbf{z})^\top \mathbf{z},
+\tag{15.29b}
+$$
+
+where $\nu$ is the distribution of the training data. Training needs no reward. For randomly drawn $\mathbf{z}$, it minimizes the residual of the successor measure's own Bellman equation, $M^\pi(s, a, \cdot) = p(\cdot \mid s, a) + \gamma\, \mathbb{E}_{S' \sim p(\cdot \mid s, a)}\big[M^\pi(S', \pi(S'), \cdot)\big]$, with target networks as in DQN, plus a penalty that keeps $\mathbb{E}_\nu[B B^\top] \approx \mathbf{I}$. When a reward is revealed, through samples of $r(s)$ at states $s \sim \nu$, the agent computes
+
+$$
+\mathbf{z}_r = \mathbb{E}_{s \sim \nu}\big[B(s)\, r(s)\big], \qquad\text{so that}\qquad q^{\pi_{\mathbf{z}}}_r(s, a) \approx F(s, a, \mathbf{z})^\top \mathbf{z}_r \ \text{ for every } \mathbf{z},
+\tag{15.29c}
+$$
+
+and acts with $\pi_{\mathbf{z}_r}$, which is greedy with respect to its own Q-function. If (15.29b) is exact, $\pi_{\mathbf{z}_r}$ is therefore optimal for $r$ (Exercise 17). This is **zero-shot RL**: no planning and no fine-tuning. FB generalizes successor features, with $B$ in the role of $\boldsymbol\phi$ and $\mathbf{z}_r$ in that of $\mathbf{w}$. Instead of hand-picked features and a finite library combined by GPI, both the features and a continuum of policies are learned from the dynamics. Universal SFs (Section 6.5) also index policies by a task vector, but they still need $\boldsymbol\phi$. Skill discovery ([Chapter 14](14-exploration.md), Section 12.2) also pre-trains without reward, but it produces skills, not a map from rewards to policies. On reward-free data from standard continuous-control domains, Touati, Rapin & Ollivier (2023) found that FB performed best and most consistently, reaching about 85% of the performance of offline RL trained with each task's reward when the replay buffer was good, whereas SFs depended on the choice of base features (Laplacian eigenfunctions worked well, most other choices inconsistently).
+
+**Experiment.** `fb_zero_shot.py` compares FB with SF + GPI in a continuing version of the four rooms of Section 6.4: no terminal states, a reward $r(s')$ on the next state, $\gamma = 0.95$ and $\nu$ uniform over the 104 cells. $B$ is a table and $F$ a small MLP of (state, $\mathbf{z}$), trained for 4,000 Adam steps with the known transition kernel (exact expectations instead of sampled transitions). Each step uses 16 task vectors on the sphere of radius $\sqrt d$, half drawn uniformly and half the rescaled $B(s)$ of a random cell (the $\mathbf{z}$ of "reach $s$"), the mixture Touati & Ollivier use. At test time $\mathbf{z}_r$ is rescaled to that sphere, which does not change the optimal policy. The SF + GPI baseline uses the four object indicators as $\boldsymbol\phi$ and the four "go to object $i$" policies of the continuing task; for a new reward it fits $\mathbf{w}$ by least squares and acts by GPI. Test rewards come from three families never used in training: *objects* ($r = \boldsymbol\phi^\top \mathbf{w}$ with $\mathbf{w} \sim U[-1, 1]^4$, linear in the SF features), *goals* (1 on one random cell) and *rooms* (a random weight on every cell of each room). Every policy is evaluated exactly. The score is the normalized regret $\sum_s (v_\ast - v^\pi) / \sum_s (v_\ast - v^{\text{random}})$, which is 0 for an optimal policy and 1 for one that does only as well as the uniform random policy (worse ones score above 1). Means over 100 rewards per family (FB: 2 seeds, range in brackets):
+
+| method | objects (linear in $\boldsymbol\phi$) | goals | rooms |
+|---|---|---|---|
+| SF + GPI, hand-picked features | 0.0004 | 0.968 | 0.102 |
+| FB, $d = 4$ | 0.834 [0.828, 0.841] | 0.908 [0.907, 0.909] | 0.259 [0.211, 0.308] |
+| FB, $d = 16$ | 0.385 [0.373, 0.397] | 0.793 [0.792, 0.793] | 0.171 [0.164, 0.178] |
+| FB, $d = 64$ | 0.271 [0.263, 0.279] | 0.404 [0.403, 0.405] | 0.154 [0.150, 0.158] |
+
+![Left: zero-shot normalized regret of FB against its rank d on three families of unseen rewards (2 seeds, shaded min-max), with SF + GPI dashed. Centre and right: values of the FB (d = 64) zero-shot policy and of the optimal policy for a reward on the single cell G.](../code/ch15_beyond_mdps/figures/fb_zero_shot.png)
+
+Three lessons. First, hand-picked features win where they fit and fail where they do not. SF + GPI is essentially optimal on rewards linear in its features, and good on room rewards because each room contains one object, whose corner the least-squares $\mathbf{w}$ points to. A reward on a single cell without an object projects to $\mathbf{w} = 0$, and GPI has nothing to go on (0.968, close to random). Second, FB learns its features from the dynamics alone, and its regret falls with the rank on every family. Smooth room rewards are handled reasonably even at $d = 4$, while point goals need $d = 64$, because a low-rank $F^\top B$ can only represent smooth successor measures. (With $d \ge |\mathcal{S}|$ an exact fit is possible in principle, and Exercise 17 applies.) Third, FB's *policies* are much better than its *values*. At $d = 64$ the relative ($L_2$) error of $F(s, a, \mathbf{z})^\top \mathbf{z}_r$ against the exact $q^{\pi_{\mathbf{z}}}_r$, averaged over 10 rewards per family, is between 0.49 and 0.79, depending on the family and seed, yet the greedy policies are good, because only the argmax over actions has to be right. Do not read FB's value estimates as calibrated.
+
+### 6.7 Multiple objectives and non-Markov task specifications
+
+Successor features handle a family of rewards $\boldsymbol\phi^\top \mathbf{w}$ that differ in how they weigh a few quantities. Often that weighting is itself the open question. A robot trades speed against energy, a recommender trades engagement against diversity, an assistant trades helpfulness against harmlessness, and the reward hypothesis ([Chapter 01](01-the-rl-problem.md), Section 3.3) hides the trade-off inside one number. **Multi-objective RL** keeps the objectives apart.
+
+A **multi-objective MDP** has a vector reward $\mathbf{r}(s, a) \in \mathbb{R}^m$, so each policy has a vector value $\mathbf{V}^\pi(s) = \mathbb{E}_\pi[\mathbf{G} \mid S_0 = s]$, with vector return $\mathbf{G} = \sum_t \gamma^t \mathbf{R}_{t+1}$. Policies are now only partially ordered. $\pi$ **Pareto-dominates** $\pi'$ if $\mathbf{V}^\pi \ge \mathbf{V}^{\pi'}$ in every component and $>$ in at least one, and the **Pareto front** is the set of undominated value vectors at the start state. If the user's preferences are a *linear* utility $U_{\mathbf{w}}(\mathbf{V}) = \mathbf{w}^\top \mathbf{V}$ with unknown $\mathbf{w} \ge 0$, a smaller set suffices: the **convex coverage set** (CCS) holds, for every $\mathbf{w}$, a policy that maximizes $\mathbf{w}^\top \mathbf{V}^\pi$ (Roijers, Vamplew, Whiteson & Dazeley, 2013). With $\boldsymbol\phi = \mathbf{r}$, $\mathbf{w}^\top \mathbf{V}^\pi$ is exactly the SF value (15.28): linearly scalarized multi-objective RL *is* the SF setting. For a nonlinear utility $U$ it matters where the utility is applied:
+
+$$
+\text{SER:}\ \max_\pi\, U\big(\mathbb{E}_\pi[\mathbf{G}]\big) \qquad\text{versus}\qquad \text{ESR:}\ \max_\pi\, \mathbb{E}_\pi\big[U(\mathbf{G})\big].
+\tag{15.29d}
+$$
+
+The *scalarized expected return* (SER) fits a user who cares about averages over many episodes; the *expected scalarized return* (ESR) fits one who lives with each episode's outcome (Hayes et al., 2022).
+
+**What linear scalarization misses.** A maximizer of $\mathbf{w}^\top \mathbf{V}$ lies on the boundary of the convex hull of the achievable value vectors (Exercise 18). Pareto-optimal points in the "dents" of the front, the **unsupported** points, are therefore never optimal for any weight. Deep Sea Treasure (DST; Vamplew, Yearwood, Dazeley & Berry, 2008, who introduced it to show exactly this limitation; Vamplew et al., 2011, made it a standard benchmark) makes this concrete. A submarine starts in the top-left corner of an $11 \times 10$ grid. Ten treasures worth 1, 2, 3, 5, 8, 16, 24, 50, 74 and 124 lie on a sea floor that gets deeper, and further away, to the right; reaching one ends the episode. The reward is (treasure, $-1$ per step) and $\gamma = 1$. `deep_sea_treasure.py` computes the front from shortest paths: $(1, -1)$, $(2, -3)$, $(3, -5)$, $(5, -7)$, $(8, -8)$, $(16, -9)$, $(24, -13)$, $(50, -14)$, $(74, -17)$ and $(124, -19)$. All ten points are Pareto-optimal, but the front is so concave that only the two extremes, $(1, -1)$ and $(124, -19)$, are supported. Exact value iteration on the scalarized MDP, over 1,001 weights $\mathbf{w} = (w_1, 1 - w_1)$, returns $(1, -1)$ for $w_1 \le 0.127$ and $(124, -19)$ for $w_1 \ge 0.128$, and nothing else; the two lines $\mathbf{w}^\top\mathbf{V}$ cross at $w_1 = 18/141 \approx 0.128$. Tabular Q-learning with optimistic initial values (3,000 episodes per weight, 101 weights) agrees with the exact optimum at every one of the 101 weights, and so it too finds only the two supported points. With zero initial values, Q-learning "finds" $(2, -3)$ at 22 weights and $(3, -5)$ at 2, and it is wrong at 88 of the 101. Scalarization did not reach these points: $\varepsilon$-greedy never discovered the far treasures, the deep-exploration failure of [Chapter 14](14-exploration.md). A weight sweep that returns unsupported points signals failed optimization, not a richer front.
+
+![Left: the Deep Sea Treasure Pareto front (time to treasure against treasure value). Only the two extreme points lie on the convex hull (dashed); Q-learning over 101 weights finds only those two, and a mixture of them (diamond, SER) dominates the unsupported point (24, -13). Right: scalarized values w·V of the two CCS policies (solid) and of the unsupported points (dotted) against the treasure weight w1; their upper envelope switches at the corner weight 0.128.](../code/ch15_beyond_mdps/figures/deep_sea_treasure.png)
+
+**Does it matter?** That depends on the utility and on which policies are acceptable (Vamplew, Dazeley, Barker & Kelarev, 2009; Hayes et al., 2022). Under SER, a **mixture policy** that picks one of two CCS policies at random at the start of each episode attains every point of the segment between them. Choosing $(124, -19)$ with probability $p$ and $(1, -1)$ otherwise gives $(1 + 123p,\, -1 - 18p)$, which Pareto-dominates the unsupported $(24, -13)$ for every $p \in [0.187, 0.667]$; at $p = 0.249$, the expected return is $(31.63, -5.48)$, and 100,000 simulated episodes average $(31.65, -5.48)$. So under SER with stochastic policies, the CCS plus mixtures suffices. Unsupported deterministic policies matter when only deterministic policies are acceptable (a treatment protocol should not flip a coin), and under ESR. With $U(\mathbf{G}) = \mathbb{1}[\text{treasure} \ge 24 \text{ and time} \le 13]$, the deterministic $(24, -13)$ policy has $\mathbb{E}[U(\mathbf{G})] = 1$, while the mixture has $\mathbb{E}[U(\mathbf{G})] = 0$, although $U$ of its *expected* return is 1: every single episode either collects 1 quickly or 124 slowly. Under ESR the optimal policy may even have to be non-stationary, since what is worth doing next depends on the reward accumulated so far.
+
+**Algorithms.** *Outer-loop* methods solve a sequence of scalarized problems. **Optimistic Linear Support** (OLS; Roijers, Whiteson & Oliehoek, 2015) solves only at the *corner weights*, where the upper envelope of the partial CCS changes slope, and stops when no corner improves; on DST it needs 3 solves ($w_1 = 0$, $w_1 = 1$ and the corner 0.128). The envelope is piecewise linear and convex in $\mathbf{w}$, like a POMDP value function in the belief (Section 2.5), and OLS is a descendant of a POMDP algorithm, Cheng's linear support. *Inner-loop* methods learn many policies at once. Pareto Q-learning (Van Moffaert & Nowé, 2014) propagates sets of vector values. Envelope Q-learning (Yang, Sun & Narasimhan, 2019) learns a preference-conditioned $Q(s, a, \mathbf{w})$, a UVFA (Section 4.2) whose "goal" is a weight vector, with a target that maximizes over actions *and* preferences. SFs + GPI build the CCS from few policies, because $\boldsymbol\psi^{\pi_i\top} \mathbf{w}$ evaluates every library policy for every weight (Alegre, Bazzan & da Silva, 2022, who combined SFs with OLS; Alegre et al., 2023). In the script, GPI over the SFs of the two CCS policies, with $\boldsymbol\phi = \mathbf{r}$, attains the optimal scalarized value for all 1,001 weights to within $1.4 \times 10^{-13}$. Constrained MDPs ([Chapter 20](20-deep-rl-in-practice.md), Section 11) encode a different preference, "maximize one objective subject to bounds on the others"; their Lagrangian (Section 11.2) is a linear scalarization whose weights, the Lagrange multipliers, are adapted by primal-dual updates. For language models, *rewarded soups* (Ramé et al., 2023) fine-tune one model per reward and interpolate their weights to trace an approximate front at deployment, and Safe RLHF (Dai et al., 2024) trains separate helpfulness-reward and harmlessness-cost models and combines them with a Lagrangian (RLHF itself is in [Chapter 18](18-rl-for-language-models.md)).
+
+**Non-Markov task specifications.** Some tasks cannot be written as a Markov reward on the given state at all, such as "fetch the coffee, then bring it to the office, without entering the kitchen while carrying it" (Abel et al., 2021, characterize which tasks a Markov reward can express; [Chapter 01](01-the-rl-problem.md), Section 3.3). A **reward machine** (Toro Icarte, Klassen, Valenzano & McIlraith, 2018, 2022) is a finite automaton over high-level events $L(s, a, s')$ ("picked up coffee", "entered kitchen"). Its state $u$ records progress through the task, and its transitions emit the rewards. The **product MDP** on $(s, u)$ is Markov again, the same "enlarge the state" move as goals (Section 4) and beliefs (Section 2), so any RL method applies. Because the machine is known, one environment transition $(s, a, s')$ can update the values of *every* machine state at once, much as hindsight relabels one trajectory for many goals. Specifications in linear temporal logic (LTL) and related formal languages can be compiled into such automata (Camacho et al., 2019). Exercise 19 shows that the automaton state is needed: on a four-cell corridor, the task "visit cell 0, then cell 3" is worth 0.729 on the product MDP, while the best policy of the cell alone that a numerical search finds is worth 0.382.
+
 ---
 
 ## 7. Meta-reinforcement learning
@@ -1103,7 +1185,7 @@ Compared with RL², MAML is **consistent**: on a task far outside $p(\mathcal{M}
 
 ### 7.5 Inference-based meta-RL: PEARL and VariBAD
 
-The Bayes-adaptive view suggests making the belief explicit. **PEARL** (Rakelly et al., 2019) introduces a latent task variable $\mathbf{z}$ and an inference network $q_{\boldsymbol\phi}(\mathbf{z} \mid \mathbf{c})$ over a **context** $\mathbf{c}$ of transitions $(s, a, r, s')$ from the current task. The posterior is a product of Gaussian factors, one per transition, so it does not depend on their order. The policy $\pi_{\boldsymbol\theta}(a \mid s, \mathbf{z})$ and critic $Q(s, a, \mathbf{z})$ are trained **off-policy** with SAC ([Chapter 12](12-continuous-control-actor-critic.md)) from a replay buffer per task; the encoder is trained through the critic's Bellman loss plus a KL penalty $D_{\mathrm{KL}}\big(q_{\boldsymbol\phi}(\mathbf{z} \mid \mathbf{c}) \,\Vert\, \mathcal{N}(\mathbf{0}, \mathbf{I})\big)$ that keeps $\mathbf{z}$ an information bottleneck. At meta-test time PEARL explores by **posterior sampling** (Thompson sampling over tasks, [Chapter 02](02-multi-armed-bandits.md)): sample $\mathbf{z}$ from the prior, act for an episode as if it were the true task, add the transitions to the context, resample from the updated posterior, and so on. Off-policy meta-training made PEARL far more sample-efficient than on-policy RL² and MAML on the continuous-control benchmarks of the time.
+The Bayes-adaptive view suggests making the belief explicit. **PEARL** (Rakelly et al., 2019) introduces a latent task variable $\mathbf{z}$ and an inference network $q_{\boldsymbol\phi}(\mathbf{z} \mid \mathbf{c})$ over a **context** $\mathbf{c}$ of transitions $(s, a, r, s')$ from the current task. The posterior is a product of Gaussian factors, one per transition, so it does not depend on their order. The policy $\pi_{\boldsymbol\theta}(a \mid s, \mathbf{z})$ and critic $Q(s, a, \mathbf{z})$ are trained **off-policy** with SAC ([Chapter 12](12-continuous-control-actor-critic.md)) from a replay buffer per task; the encoder is trained through the critic's Bellman loss plus a KL penalty $D_{\mathrm{KL}}\big(q_{\boldsymbol\phi}(\mathbf{z} \mid \mathbf{c}) \,\Vert\, \mathcal{N}(\mathbf{0}, \mathbf{I})\big)$ that keeps $\mathbf{z}$ an information bottleneck. At meta-test time PEARL explores by **posterior sampling** (Thompson sampling over tasks, [Chapter 02](02-multi-armed-bandits.md); holding the sample for a whole episode is PSRL, [Chapter 14](14-exploration.md) Section 4.1, which shows why per-episode rather than per-step resampling is essential for deep exploration): sample $\mathbf{z}$ from the prior, act for an episode as if it were the true task, add the transitions to the context, resample from the updated posterior, and so on. Off-policy meta-training made PEARL far more sample-efficient than on-policy RL² and MAML on the continuous-control benchmarks of the time.
 
 ```
 Algorithm 15.12  PEARL (meta-training, simplified)
@@ -1168,6 +1250,85 @@ Remedies for plasticity loss are mostly simple and surprisingly effective: perio
 
 ---
 
+## 10. Generalization across environments
+
+Section 7 trained on a task distribution and tested on fresh draws from it, and it assumed that training tasks could be sampled at will. In practice the training set is often a fixed, finite collection of levels, simulator settings or scenes, and deep RL agents are very good at memorizing it. This section asks when a policy trained on some environments works on others, and how to choose the environments to train on.
+
+### 10.1 Contextual MDPs and the generalization gap
+
+A **contextual MDP** (Hallak, Di Castro & Mannor, 2015) is a family $\lbrace\mathcal{M}_c\rbrace_{c \in \mathcal{C}}$ of MDPs with common states and actions. The context $c \sim p(c)$ (a level seed, physical parameters, a layout) fixes the dynamics, the reward and the initial-state distribution. (These are not the *constrained* MDPs, or CMDPs, of [Chapter 20](20-deep-rl-in-practice.md).) The objective is the average over the whole distribution, $J(\pi) = \mathbb{E}_{c \sim p(c)}[J_c(\pi)]$, but training sees only $N$ contexts $C_{\text{train}} = \lbrace c_1, \dots, c_N\rbrace$. The **generalization gap** of a policy $\hat\pi$ trained on them is
+
+$$
+\Delta(\hat\pi) = J_{C_{\text{train}}}(\hat\pi) - J(\hat\pi), \qquad J_{C_{\text{train}}}(\pi) \doteq \frac{1}{N} \sum_{i=1}^{N} J_{c_i}(\pi),
+\tag{15.33}
+$$
+
+the RL counterpart of the train/test gap of supervised learning (Kirk, Zhang, Grefenstette & Rocktäschel, 2023, survey the area). The agent usually does not observe $c$, so this is also a problem of partial observability. Meta-RL (Section 7) is the variant in which the agent may adapt during a test trial. Here we ask for *zero-shot* generalization: the trained policy is simply run on the new context.
+
+### 10.2 Evidence, remedies and an experiment
+
+Zhang, Vinyals, Munos & Bengio (2018) trained deep RL agents on fixed sets of random gridworld mazes and found near-perfect training performance alongside failure on new mazes, with a gap that shrank as the training set grew. Cobbe, Klimov, Hesse, Kim & Schulman (2019) built **CoinRun**, a procedurally generated platformer, and measured test success against the number of training levels, from 100 to 16,000. Agents overfit to surprisingly large training sets: the gap was substantial below about 4,000 levels and still visible at 16,000, and agents trained on an unbounded supply of levels generalized best. **Procgen** (Cobbe, Hesse, Hilton & Schulman, 2020), sixteen procedurally generated games, made the protocol standard: train on 200 levels per game, test on the full distribution.
+
+Cobbe et al. (2019) found that deeper convolutional encoders, $L_2$ regularization, dropout, batch normalization and data augmentation all narrowed the gap. Augmentation is now standard for pixel inputs: random crops, translations and colour jitter in RAD (Laskin et al., 2020), random shifts in DrQ ([Chapter 09](09-deep-q-learning.md), Section 12). A subtler culprit is the encoder shared by policy and value. The value must predict how much return is left, which depends on level-specific details such as the layout and the elapsed time, and a shared encoder hands those details to the policy. IDAAC (Raileanu & Fergus, 2021) separates the two networks and makes the policy's features predict advantages while an adversarial loss strips them of information about episode progress; phasic policy gradient ([Chapter 11](11-trust-regions-and-ppo.md)) also trains the value function separately.
+
+**Experiment.** `procgen_lite.py` is a CPU-sized version of the Procgen protocol. A level is a random maze ($7 \times 7$ to $9 \times 9$, each cell a wall with probability 0.25, start and goal at least half the side length apart in Manhattan distance, goal reachable). The agent sees only an egocentric $5 \times 5$ window and the signs of the goal's row and column offsets, so nothing in its input names the level. It has separate $2 \times 64$ MLPs for policy and value (no shared encoder) and is trained by PPO ([Chapter 11](11-trust-regions-and-ppo.md); 32 parallel environments, rollouts of 32 steps) for a fixed budget of 200,000 environment steps. Reward 1 for reaching the goal within 60 steps, $\gamma = 0.99$. We train on $N$ levels and measure success of the sampled policy on the training levels (at most 200 of them, about 200 episodes in all) and on 200 held-out levels (two episodes each), with 3 seeds:
+
+| training levels $N$ | 1 | 4 | 16 | 64 | 256 | unlimited |
+|---|---|---|---|---|---|---|
+| success on training levels | 1.000 | 0.998 | 0.979 | 0.946 | 0.887 | (= held-out) |
+| success on held-out levels | 0.177 | 0.394 | 0.638 | 0.792 | 0.873 | 0.883 |
+| generalization gap (15.33) | 0.822 | 0.604 | 0.342 | 0.154 | 0.013 | 0 |
+
+![Left: success of PPO on its training levels and on 200 held-out levels against the number of training levels (3 seeds; vertical bars span the seeds). Right: held-out success with uniform level sampling and with prioritized level replay.](../code/ch15_beyond_mdps/figures/procgen_lite.png)
+
+The single-level agent solves its own maze every time and only 18% of new ones (0.14 to 0.25 across seeds). Nothing forced it to use the goal bits: a chain of local views that leads along one route is enough on one maze. More levels force it to use the goal direction. Held-out success climbs steadily with $N$, while training success *falls*, because a varied training set can no longer be memorized. The gap has closed by $N = 256$ (0.013): training and held-out success, 0.887 and 0.873, both match the unlimited-level result, 0.883. The plateau near 0.88 probably reflects the limits of a memoryless policy with a $5 \times 5$ view, which can be trapped in dead ends (we did not test a recurrent agent). The pattern is the same as in CoinRun, at a scale that runs in minutes.
+
+### 10.3 Why generalization is hard: the epistemic POMDP
+
+Why does a policy that is optimal on every training level fail on new ones, even when each level is fully observed? Ghosh, Rahme, Kumar, Zhang, Adams & Levine (2021) answered with the **epistemic POMDP**. After training on finitely many contexts, the agent does not know which MDP it faces at test time, even if each MDP is fully observed: its observation of the state does not identify the context, and the training data leave several contexts consistent with what it sees. The test problem is then a POMDP whose hidden state includes the context (exactly the Bayes-adaptive construction of Section 7.2, with a posterior over $c$ given the training data). Its Bayes-optimal policy is in general *history-dependent*: it acts to find out which context it is in, and changes behaviour when it learns. A memoryless policy commits to one behaviour per observation, which is right in some contexts and fatal in others, and even the best memoryless policy can be far from Bayes-optimal (Exercise 20: in a two-context corridor, 0.527 against 0.745). Two consequences follow. Memory and history-dependent policies (Section 3) help generalization even in fully observed tasks, and deterministic policies that are greedy with respect to one point estimate are the most fragile. Ghosh et al. approximate the epistemic POMDP with an ensemble (LEEP): several policies, each trained on a different subset of the training levels and kept close to one another, are combined at test time; on three of the four Procgen games they tested this generalized better than PPO, and it matched PPO on the fourth.
+
+### 10.4 Choosing the training environments: from domain randomization to UED
+
+If $p(c)$ is ours to design, which distribution of training contexts gives the best test performance? **Domain randomization** ([Chapter 20](20-deep-rl-in-practice.md), Section 12, Eq. 20.22) samples simulator parameters from a fixed, usually uniform, distribution. A uniform $p(c)$ wastes most samples on levels that are trivial or impossible for the current agent, which motivates **unsupervised environment design** (UED): adapt the distribution of training contexts to the agent. One principled target is the policy with the smallest worst-case **regret**,
+
+$$
+\pi^\ast_{\text{MMR}} \in \mathop{\mathrm{arg\,min}}_\pi\, \max_{c \in \mathcal{C}}\, \big[J_c(\pi^\ast_c) - J_c(\pi)\big],
+\tag{15.34}
+$$
+
+where $\pi^\ast_c$ is optimal for context $c$. Minimax *return*, $\max_\pi \min_c J_c(\pi)$, is dominated by impossible levels, on which every policy scores zero; minimax *regret* ignores them, because their regret is zero too, and concentrates on levels that are solvable but not yet solved. **PAIRED** (Dennis et al., 2020) estimates the regret with a second, *antagonist* agent: an adversary proposes levels, the regret estimate is the antagonist's return minus the protagonist's, the adversary maximizes it and both agents learn. At equilibrium the protagonist is minimax-regret optimal, and the levels grow in complexity as the agents improve.
+
+**Prioritized level replay** (PLR; Jiang, Grefenstette & Rocktäschel, 2021) is a simpler curator that reuses levels the agent has already seen. It scores each level by how much the agent can still learn there. The original paper's default score is the **L1 value loss**, the average of $|\hat A_t|$ over the level's last episode, with GAE advantages $\hat A_t$ ([Chapter 11](11-trust-regions-and-ppo.md)). Levels at the edge of the agent's ability have changing returns and large value errors, while levels far beyond it have steady zero returns and small errors. Robust PLR (below) scores by the **positive value loss**, the average of $\max(\hat A_t, 0)$, as an estimate of regret, and our implementation does the same. PLR replays high-scoring levels, mixed with a *staleness* term so that old scores are refreshed:
+
+```
+Algorithm 15.14  Prioritized Level Replay (PLR)
+Input: training levels C_train (or a level generator); temperature β_PLR; staleness weight ρ_PLR;
+       probability p_new of trying an unseen level; any on-policy learner (PPO)
+Initialise: no level seen; episode counter n <- 0
+            (each seen level i keeps a score score_i and the episode count last_i when it was last played)
+Repeat:
+    n <- n + 1
+    with probability p_new (always, if no level has been seen; never, once all have): pick an unseen level i
+    otherwise pick a seen level i ~ P_replay:
+        P_S(i) ∝ (1 / rank(score_i))^(1/β_PLR)      # rank 1 = highest score
+        P_C(i) ∝ n - last_i                           # staleness
+        P_replay = (1 - ρ_PLR) P_S + ρ_PLR P_C
+    last_i <- n; play an episode (or a rollout segment) on level i; update the learner
+    score_i <- (1/T) Σ_t max(Â_t, 0)   # positive value loss (robust PLR); original PLR: (1/T) Σ_t |Â_t|
+```
+
+A fixed $p_{\text{new}}$ is our simplification: the original PLR replays a seen level with a probability equal to the fraction of the training levels already seen, so that it explores new levels less and less.
+
+Robust PLR (Jiang, Dennis, Parker-Holder, Foerster, Grefenstette & Rocktäschel, 2021) updates the policy *only* on replayed levels, using fresh random levels just to score them. This turns PLR into a minimax-regret method with a random level generator, and in their experiments it generalized better than the original. **ACCEL** (Parker-Holder et al., 2022) adds a second source of new levels to robust PLR, small *edits* of high-regret replayed levels, so that complexity grows gradually, and **POET** (Wang, Lehman, Clune & Stanley, 2019) co-evolves a population of environments together with agents that solve them, transferring agents between environments. At much larger scale, **XLand** (Open-Ended Learning Team et al., 2021) trained agents on a vast procedurally generated space of 3D games with a dynamically adapted task distribution, and the **Adaptive Agent** (AdA; Adaptive Agent Team et al., 2023) combined such an automatic curriculum with a large memory-based (RL²-style) agent that adapts in-context to new tasks within a few trials, connecting this section to Sections 7 and 8.
+
+Our toy mazes are a sobering check. With $\beta_{\text{PLR}} = 0.1$, $\rho_{\text{PLR}} = 0.1$ and $p_{\text{new}} = 0.5$, PLR's held-out success at $N = 16, 64, 256$ was 0.684, 0.783 and 0.838, against 0.638, 0.792 and 0.873 for uniform sampling (3 seeds each; the seed ranges overlap at $N = 16$ and 64, and at 256 they only touch: the best PLR seed and the worst uniform seed both scored 0.853). It may have helped slightly at $N = 16$, made no clear difference at 64 and probably hurt at 256; three seeds cannot settle differences this small. A plausible reason is concentration: under PLR, 16%, 34% and 46% of the training episodes went to the most-played 10% of the levels, against 7%, 10% and 12% under uniform sampling. On a family where all levels are similar in difficulty and diversity is what drives generalization, focusing on a few high-score levels costs more than it gains. Curricula should pay off most when levels differ widely in difficulty, as in Procgen and in the mazes PAIRED and ACCEL generate, which is where their benefits were demonstrated; measure before assuming.
+
+### 10.5 The failure mode: goal misgeneralization
+
+A small generalization gap in *success rate* is not the only thing that can go wrong. An agent can generalize its *capabilities* while generalizing the wrong *goal*. In a CoinRun variant in which the coin always sat at the right end of the level during training, agents learned "go right" rather than "get the coin", and they competently ran past a coin moved elsewhere (Langosco et al., 2022; [Chapter 20](20-deep-rl-in-practice.md), Section 2.1). Our single-level maze agent shows the precondition but not the full phenomenon. Reaching the goal and following one memorized route were indistinguishable on its training level, and on new mazes it mostly fails, consistent with having learned the route; but it simply fails rather than competently pursuing something else (we did not check what it does instead). In both cases the learned behaviour was perfectly consistent with the training data. The remedy is the one this section has argued for: training distributions diverse enough that only the intended goal explains success on all of them, and held-out evaluation that checks the goal, not just the return.
+
+---
+
 ## In code
 
 The experiments are interleaved with the sections above; this is the map. Run every script from the repository root; `--quick` is a smoke test (a few seconds, no figures), and [`code/ch15_beyond_mdps/README.md`](../code/ch15_beyond_mdps/README.md) lists options, measured runtimes and headline numbers.
@@ -1178,8 +1339,11 @@ The experiments are interleaved with the sections above; this is the map. Run ev
 | [`her_bitflip.py`](../code/ch15_beyond_mdps/her_bitflip.py) | 4 | `python code/ch15_beyond_mdps/her_bitflip.py` | `relabel` (the four strategies), the target computation in `train` (Eq. 15.14) |
 | [`four_rooms_options.py`](../code/ch15_beyond_mdps/four_rooms_options.py) | 5.3–5.5 | `python code/ch15_beyond_mdps/four_rooms_options.py` | `option_model` (Eqs. 15.19–15.20), `smdp_value_iteration` (15.21), `learn` (Algorithms 15.4–15.5), `intra_option_offpolicy` |
 | [`successor_features_gpi.py`](../code/ch15_beyond_mdps/successor_features_gpi.py) | 6 | `python code/ch15_beyond_mdps/successor_features_gpi.py` | `td_learn_sr` (15.26), `ObjectTasks.policy_sf` (15.27), `gpi_policy` (15.29) |
+| [`fb_zero_shot.py`](../code/ch15_beyond_mdps/fb_zero_shot.py) | 6.6 | `python code/ch15_beyond_mdps/fb_zero_shot.py` | `train_fb` (the FB Bellman loss behind Eq. 15.29b, expanded so that the $N \times N$ density is never formed), `fb_policy` (Eq. 15.29c), `sf_gpi_policy` |
+| [`deep_sea_treasure.py`](../code/ch15_beyond_mdps/deep_sea_treasure.py) | 6.7 | `python code/ch15_beyond_mdps/deep_sea_treasure.py` | `DST.shortest_times` (the Pareto front), `q_learning_sweep` (scalarized Q-learning; `optimistic=False` reproduces the exploration failure), `ols_full` (OLS), `DST.sf` (SFs with $\boldsymbol\phi = \mathbf{r}$) |
 | [`rl2_bandits.py`](../code/ch15_beyond_mdps/rl2_bandits.py) | 7 | `python code/ch15_beyond_mdps/rl2_bandits.py` | `bayes_optimal_independent` (Eq. 15.31), `rollout` and `train_rl2` (Algorithm 15.10; it also prints the gradient-norm diagnostic of Section 7.3) |
-| [`exercise_solutions.py`](../code/ch15_beyond_mdps/exercise_solutions.py) | Exercises | `python code/ch15_beyond_mdps/exercise_solutions.py` | numerical checks for Exercises 2–4, 7, 9–15 |
+| [`procgen_lite.py`](../code/ch15_beyond_mdps/procgen_lite.py) | 10 | `python code/ch15_beyond_mdps/procgen_lite.py` | `make_level`, `train` (PPO with GAE; time-outs bootstrap), `PLRSampler` (Algorithm 15.14) |
+| [`exercise_solutions.py`](../code/ch15_beyond_mdps/exercise_solutions.py) | Exercises | `python code/ch15_beyond_mdps/exercise_solutions.py` | numerical checks for Exercises 2–4, 7, 9–16 and 19–21 |
 
 A small piece of the alpha-vector backup shows how directly Eqs. (15.9)–(15.10) translate into code (with two hidden states, `prune` is an exact upper envelope of lines):
 
@@ -1222,6 +1386,9 @@ for _ in range(k):
 12. **Weak baselines in meta-RL.** A meta-learner that beats UCB and Thompson sampling can still lose to a simple greedy rule at short horizons (Section 7.3). Compare against the Bayes-optimal policy when it is computable, and against strong simple heuristics when it is not. Also evaluate on held-out tasks.
 13. **Badly scaled losses in shared recurrent networks.** In our RL² run, an unscaled value loss starved the policy gradient: its gradient on the shared GRU weights was over 100 times larger than the policy loss's (Section 7.3). Log the per-term gradient norms on shared parameters.
 14. **Notation clash.** In this chapter $b$ is a belief; in the off-policy chapters it is a behaviour policy. Here the behaviour policy is $\mu$, and the policy over options is $\pi_\Omega$ (Sutton, Precup & Singh write $\mu$ for it).
+15. **Reading training-level success as generalization.** The single-level maze agent of Section 10.2 succeeds every time on its own level and 18% of the time on new ones, and even with 64 training levels the gap is 0.15. Report held-out levels, and check that the agent pursues the intended goal (Section 10.5).
+16. **Sweeping weights to map a Pareto front.** Linear scalarization finds only supported points: 2 of 10 on Deep Sea Treasure (Section 6.7). Unsupported points that do appear in a sweep usually signal failed optimization (Q-learning without optimistic initialization "found" two). Decide first whether the utility is linear, whether stochastic mixtures are acceptable, and whether SER or ESR applies.
+17. **Trusting zero-shot value estimates.** At $d = 64$, FB's policies were good on room rewards (normalized regret 0.15), yet its own Q-value estimates for those rewards had relative errors of about 0.5 (0.49–0.79 across the three reward families; Section 6.6). Evaluate zero-shot policies by running them.
 
 ---
 
@@ -1235,9 +1402,15 @@ for _ in range(k):
 
 **Successor representations.** Dayan (1993, *Neural Computation*) introduced the SR; Mahadevan & Maggioni (2007, JMLR) developed the related proto-value functions; Stachenfeld, Botvinick & Gershman (2017, *Nature Neuroscience*) proposed the SR as a model of hippocampal coding. Barreto et al. (2017, NeurIPS) introduced successor features and GPI, followed by deep versions (Barreto et al., 2018, ICML) and universal SF approximators (Borsa et al., 2019, ICLR).
 
+**Representations and zero-shot RL.** Givan, Dean & Greig (2003, *Artificial Intelligence*) formalized bisimulation for MDPs, and Ferns, Panangaden & Precup (2004, UAI) introduced bisimulation metrics. DeepMDP (Gelada et al., 2019, ICML) and DBC (Zhang, McAllister, Calandra, Gal & Levine, 2021, ICLR) carried these ideas into deep RL. SPR (Schwarzer et al., 2021, ICLR) popularized self-predictive representations, which Tang et al. (2023, ICML) and Ni et al. (2024, ICLR) analysed. Contrastive RL is due to Eysenbach, Zhang, Salakhutdinov & Levine (2022, NeurIPS), and forward-backward representations to Touati & Ollivier (2021, NeurIPS), evaluated across domains by Touati, Rapin & Ollivier (2023, ICLR).
+
+**Multiple objectives and task specifications.** Roijers, Vamplew, Whiteson & Dazeley (2013, JAIR) surveyed multi-objective sequential decision-making from the utility-based perspective, and Hayes et al. (2022, *Autonomous Agents and Multi-Agent Systems*) wrote a practical guide that distinguishes SER from ESR. Vamplew, Yearwood, Dazeley & Berry (2008, Australasian Joint Conference on AI) introduced Deep Sea Treasure to expose the limits of scalarization, Vamplew, Dazeley, Barker & Kelarev (2009, same conference) showed how to build stochastic mixture policies from scalarized solutions, and Vamplew et al. (2011, *Machine Learning*) made Deep Sea Treasure part of a standard benchmark suite. Optimistic Linear Support is due to Roijers, Whiteson & Oliehoek (2015, JAIR), building on Cheng's (1988, PhD thesis) linear support for POMDPs; Pareto Q-learning to Van Moffaert & Nowé (2014, JMLR); envelope Q-learning to Yang, Sun & Narasimhan (2019, NeurIPS); and SF-based OLS to Alegre, Bazzan & da Silva (2022, ICML). Reward machines were introduced by Toro Icarte, Klassen, Valenzano & McIlraith (2018, ICML; journal version 2022, JAIR), and Camacho et al. (2019, IJCAI) compiled LTL and other formal languages into them.
+
 **Meta-learning.** Schmidhuber's 1987 diploma thesis and the volume edited by Thrun & Pratt (1998) framed "learning to learn"; Hochreiter, Younger & Conwell (2001, ICANN) meta-learned with recurrent networks. Treating adaptive control as a Markov problem on the pair (state, posterior) goes back to Bellman's *Adaptive Control Processes: A Guided Tour* (1961) and to Martin's *Bayesian Decision Problems and Markov Chains* (1967); Duff (2002, PhD thesis, UMass Amherst) developed computational procedures for Bayes-adaptive MDPs. RL² (Duan et al., 2016) and "learning to reinforcement learn" (Wang et al., 2016) appeared as arXiv preprints within weeks of each other; MAML (Finn, Abbeel & Levine, 2017, ICML), PEARL (Rakelly et al., 2019, ICML) and VariBAD (Zintgraf et al., 2020, ICLR) followed. Ortega et al. (2019) connected meta-learned sequential strategies with Bayes-optimality. Algorithm Distillation (Laskin et al., 2023, ICLR) and the Decision-Pretrained Transformer (Lee et al., 2023, NeurIPS) launched supervised in-context RL.
 
 **Continual RL.** Ring's 1994 PhD thesis used the term "continual learning" for RL agents. Elastic weight consolidation (Kirkpatrick et al., 2017, PNAS), progressive networks (Rusu et al., 2016) and CLEAR (Rolnick et al., 2019, NeurIPS) address forgetting; loss of plasticity was studied by Kumar et al. (2021, ICLR), Lyle, Rowland & Dabney (2022, ICLR), Nikishin et al. (2022, ICML), Sokar et al. (2023, ICML), Abbas et al. (2023, CoLLAs) and Dohare et al. (2024, *Nature*).
+
+**Generalization across environments.** Hallak, Di Castro & Mannor (2015, arXiv) defined contextual MDPs. Zhang, Vinyals, Munos & Bengio (2018, arXiv) and Cobbe, Klimov, Hesse, Kim & Schulman (2019, ICML) documented overfitting in deep RL, Procgen (Cobbe, Hesse, Hilton & Schulman, 2020, ICML) became the standard benchmark, and Kirk, Zhang, Grefenstette & Rocktäschel (2023, JAIR) surveyed the field. RAD (Laskin et al., 2020, NeurIPS), IDAAC (Raileanu & Fergus, 2021, ICML) and PPG (Cobbe, Hilton, Klimov & Schulman, 2021, ICML) are representative remedies, and Ghosh et al. (2021, NeurIPS) introduced the epistemic POMDP. Adaptive environment design for generalization took shape with POET (Wang, Lehman, Clune & Stanley, 2019, arXiv) and PAIRED (Dennis et al., 2020, NeurIPS), which named unsupervised environment design, followed by PLR (Jiang, Grefenstette & Rocktäschel, 2021, ICML), robust PLR (Jiang et al., 2021, NeurIPS) and ACCEL (Parker-Holder et al., 2022, ICML). XLand (Open-Ended Learning Team et al., 2021, arXiv) and AdA (Adaptive Agent Team et al., 2023, ICML) scaled open-ended training, and Langosco et al. (2022, ICML) described goal misgeneralization.
 
 ---
 
@@ -1251,8 +1424,11 @@ for _ in range(k):
 * **Options** $(\mathcal{I}, \pi, \beta)$ turn an MDP into a **semi-MDP**; their multi-time models fold duration into discounting. Hallway options let SMDP value iteration propagate value a room per sweep and make the first episodes of learning 4.8–14 times shorter, but options should augment primitives. **Intra-option learning** learns about options it never executes.
 * **Option-critic** learns options by gradients (intra-option policy gradient and termination gradient), **FeUdal Networks** and **HIRO** by having a manager set goals for a worker (HIRO with an off-policy relabelling correction), and **MAXQ** decomposes values with completion functions. Discovering good options remains open.
 * The **successor representation** $\mathbf{M} = (\mathbf{I} - \gamma\mathbf{P}_\pi)^{-1}$ separates dynamics from reward; **successor features** do so for rewards linear in features, and **GPI** combines a library of policies into one that is at least as good as each, giving near-optimal zero-shot transfer when the library covers the new task.
+* A representation for transfer can keep what determines rewards and dynamics (**bisimulation** metrics, which bound value differences), what predicts itself (**self-predictive** latents, kept from collapsing by stop-gradients and fast predictors) or what evaluates every reward (**successor measures**). **Forward-backward** representations learn successor measures for a family of policies without reward and are zero-shot optimal when exact. In the four rooms, FB's regret on unseen single-cell goals fell from 0.91 to 0.40 as its rank grew from 4 to 64, while SF + GPI was near-optimal on rewards linear in its hand-picked features, good on room rewards (one object per room) and close to random on single-cell goals.
+* **Multi-objective RL** replaces the reward by a vector. Linear scalarization finds only the **supported** points of the Pareto front (2 of 10 on Deep Sea Treasure). Under SER, mixtures of convex-coverage-set policies dominate the unsupported points; under ESR, or when only deterministic policies are acceptable, they need not. OLS, envelope Q-learning and SFs + GPI compute the CCS. **Reward machines** make non-Markov task specifications Markov on a product state.
 * **Meta-RL** optimizes the return of a whole adaptation trial over a task distribution; its ideal is the **Bayes-optimal** policy of the Bayes-adaptive MDP. RL² (recurrent), MAML (gradient) and PEARL/VariBAD (inference) approximate it differently. Our RL² agent beat UCB1 and Thompson sampling on bandit tasks and came within 15–18% of the exact Bayes-optimal regret, without beating a simple greedy rule.
 * **In-context RL** (Algorithm Distillation) distills learning histories into a transformer that improves without weight updates. **Continual RL** must balance forgetting against **loss of plasticity**, which resets and re-initialization of dormant units mitigate.
+* **Generalization across environments**: a policy trained on few levels of a **contextual MDP** memorizes them. Our maze agent succeeded on its single training level every time and on 18% of new ones; the gap closed by 256 levels. The **epistemic POMDP** explains why memoryless policies generalize poorly even in fully observed tasks. **Environment design** (domain randomization, PAIRED, PLR, ACCEL) shapes the training distribution, ideally toward minimax regret, but on our homogeneous mazes PLR did not reliably beat uniform sampling.
 
 ## Key equations
 
@@ -1293,7 +1469,23 @@ $$
 $$
 
 $$
+\text{Bisimulation metric:}\quad d_{\mathrm{bis}}(s, t) = \max_a \big[|r(s, a) - r(t, a)| + \gamma W_1\big(p(\cdot \mid s, a), p(\cdot \mid t, a); d_{\mathrm{bis}}\big)\big], \qquad |v_\ast(s) - v_\ast(t)| \le d_{\mathrm{bis}}(s, t)
+$$
+
+$$
+\text{Forward-backward:}\quad M^{\pi_{\mathbf{z}}}(s, a, \mathrm{d}s') \approx F(s, a, \mathbf{z})^\top B(s')\, \nu(\mathrm{d}s'), \quad \pi_{\mathbf{z}}(s) = \mathop{\mathrm{arg\,max}}_a F(s, a, \mathbf{z})^\top \mathbf{z}, \quad \mathbf{z}_r = \mathbb{E}_{s \sim \nu}[B(s)\, r(s)]
+$$
+
+$$
+\text{Multi-objective:}\quad \text{linear: } \max_\pi \mathbf{w}^\top \mathbf{V}^\pi, \qquad \text{SER: } \max_\pi U\big(\mathbb{E}_\pi[\mathbf{G}]\big), \qquad \text{ESR: } \max_\pi \mathbb{E}_\pi\big[U(\mathbf{G})\big]
+$$
+
+$$
 \text{Meta-RL objective and MAML meta-gradient:}\quad J(\boldsymbol\theta) = \mathbb{E}_{\mathcal{M}}\, \mathbb{E}\Big[\sum_{t<H} R_{t+1}\Big], \quad \nabla_{\boldsymbol\theta} J_{\mathcal{M}}(\boldsymbol\theta') = \big(\mathbf{I} + \alpha \nabla^2_{\boldsymbol\theta} \hat J_{\mathcal{M}}(\boldsymbol\theta)\big) \nabla_{\boldsymbol\theta'} J_{\mathcal{M}}(\boldsymbol\theta')
+$$
+
+$$
+\text{Generalization gap and minimax regret:}\quad \Delta(\hat\pi) = J_{C_{\text{train}}}(\hat\pi) - \mathbb{E}_{c \sim p(c)}\big[J_c(\hat\pi)\big], \qquad \pi^\ast_{\text{MMR}} \in \mathop{\mathrm{arg\,min}}_\pi \max_{c}\big[J_c(\pi^\ast_c) - J_c(\pi)\big]
 $$
 
 ---
@@ -1470,6 +1662,88 @@ In RL the inner gradient is a stochastic estimate that also depends on $\theta$ 
 
 </details>
 
+**Exercise 16 ★ (the bisimulation bound).** Let $d_{\mathrm{bis}}$ be the fixed point of (15.29a). (a) Use the Kantorovich–Rubinstein duality, $W_1(p, q; d) = \sup\lbrace \mathbb{E}_p[f] - \mathbb{E}_q[f] : |f(x) - f(y)| \le d(x, y) \text{ for all } x, y\rbrace$, to show that if $v$ is 1-Lipschitz with respect to $d_{\mathrm{bis}}$, then so is its Bellman optimality backup $\mathcal{T}^\ast v$. (b) Conclude that $|v_\ast(s) - v_\ast(t)| \le d_{\mathrm{bis}}(s, t)$. (c) What is $d_{\mathrm{bis}}(s, t)$ for two states with the same expected rewards and the same next-state distribution under every action?
+
+<details><summary>Solution</summary>
+
+(a) Fix an action $a$ and write $p = p(\cdot \mid s, a)$, $q = p(\cdot \mid t, a)$. Since $v$ and $-v$ are both 1-Lipschitz, duality gives $|\mathbb{E}_p[v] - \mathbb{E}_q[v]| \le W_1(p, q; d_{\mathrm{bis}})$, so
+
+$$
+\big|\,[r(s, a) + \gamma \mathbb{E}_p v] - [r(t, a) + \gamma \mathbb{E}_q v]\,\big| \le |r(s, a) - r(t, a)| + \gamma\, W_1(p, q; d_{\mathrm{bis}}).
+$$
+
+Because $|\max_a x_a - \max_a y_a| \le \max_a |x_a - y_a|$, taking the maximum over actions gives $|(\mathcal{T}^\ast v)(s) - (\mathcal{T}^\ast v)(t)| \le d_{\mathrm{bis}}(s, t)$ by (15.29a).
+
+(b) $v_0 = 0$ is 1-Lipschitz, so by (a) every value-iteration iterate $v_k = (\mathcal{T}^\ast)^k v_0$ is too. Since $v_k \to v_\ast$ ([Chapter 03](03-dynamic-programming.md)), the inequality $|v_k(s) - v_k(t)| \le d_{\mathrm{bis}}(s, t)$ passes to the limit.
+
+(c) Zero: the fixed-point equation reads $d_{\mathrm{bis}}(s, t) = \max_a \gamma\, W_1(p, p; d_{\mathrm{bis}}) = 0$. Such states are bisimilar and can be merged without losing any value. `exercise_solutions.py` (`ex16`) computes $d_{\mathrm{bis}}$ for three random MDPs with 5 states and 2 actions by fixed-point iteration (each $W_1$ is a small transport linear program) and finds $\max_{s \ne t} |v_\ast(s) - v_\ast(t)| / d_{\mathrm{bis}}(s, t) = 0.895$, within the bound.
+
+</details>
+
+**Exercise 17 ★★ (exact FB is zero-shot optimal).** Assume that (15.29b) holds with equality for every $\mathbf{z}$ and that the reward depends on the next state only. (a) Show that $q^{\pi_{\mathbf{z}}}_r(s, a) = F(s, a, \mathbf{z})^\top \mathbf{z}_r$ for every $\mathbf{z}$. (b) Show that $\pi_{\mathbf{z}_r}$ is optimal for $r$. (c) In `fb_zero_shot.py`, the regret on single-cell goals falls from 0.91 to 0.40 as $d$ grows from 4 to 64, while room rewards are handled reasonably well already at $d = 4$ (0.26). Explain.
+
+<details><summary>Solution</summary>
+
+(a) $q^{\pi_{\mathbf{z}}}_r(s, a) = \sum_{s'} M^{\pi_{\mathbf{z}}}(s, a, s')\, r(s') = \sum_{s'} F(s, a, \mathbf{z})^\top B(s')\, \nu(s')\, r(s') = F(s, a, \mathbf{z})^\top \mathbb{E}_{s \sim \nu}[B(s)\, r(s)] = F(s, a, \mathbf{z})^\top \mathbf{z}_r$.
+
+(b) Put $\mathbf{z} = \mathbf{z}_r$ in (a): $q^{\pi_{\mathbf{z}_r}}_r(s, a) = F(s, a, \mathbf{z}_r)^\top \mathbf{z}_r$, and by definition $\pi_{\mathbf{z}_r}(s)$ maximizes this same expression over $a$. So $\pi_{\mathbf{z}_r}$ is greedy with respect to its own action values, $v^{\pi_{\mathbf{z}_r}}(s) = q^{\pi_{\mathbf{z}_r}}_r(s, \pi_{\mathbf{z}_r}(s)) = \max_a q^{\pi_{\mathbf{z}_r}}_r(s, a)$. Its value function therefore satisfies the Bellman optimality equation, whose only solution is $v_\ast$: policy improvement has nothing left to improve.
+
+(c) For a fixed $\mathbf{z}$, $F(s, a, \mathbf{z})^\top B(s')$ is a matrix over $(s, a) \times s'$ of rank at most $d$. The true density $M^\pi(s, a, s')/\nu(s')$ contains the one-step term $p(s' \mid s, a)/\nu(s')$, a sparse matrix of rank up to $|\mathcal{S}| = 104$. A rank-$d$ fit keeps the smooth, slowly varying part of the successor measure, much as the leading SR eigenvectors of Section 6.1 do: enough to tell rooms apart, not enough to single out one cell. Room rewards are smooth, so a few dimensions suffice; a reward on one cell needs many. With $d = |\mathcal{S}|$ an exact solution exists, namely $B(s') = \mathbf{e}_{s'}/\nu(s')$ and $F(s, a, \mathbf{z})$ equal to the row $M^{\pi}(s, a, \cdot)$ of the optimal policy $\pi$ for the reward $\mathbf{z}$, but training still has to find it.
+
+</details>
+
+**Exercise 18 ★ (what linear scalarization can find).** (a) Show that if $\pi$ maximizes $\mathbf{w}^\top \mathbf{V}^\pi(s_0)$ for some $\mathbf{w}$ with all components positive, then $\mathbf{V}^\pi(s_0)$ is Pareto-optimal and lies on the boundary of the convex hull of the achievable value vectors. (b) In Deep Sea Treasure, show that $(24, -13)$ is optimal for no $\mathbf{w} = (w_1, 1 - w_1)$ with $w_1 \in [0, 1]$, and find the weight at which $(1, -1)$ and $(124, -19)$ tie. (c) Why does `deep_sea_treasure.py` give the time objective a weight of at least $10^{-6}$?
+
+<details><summary>Solution</summary>
+
+(a) If some $\pi'$ dominated $\pi$, then $\mathbf{w}^\top \mathbf{V}^{\pi'} - \mathbf{w}^\top \mathbf{V}^\pi = \sum_i w_i (V^{\pi'}_i - V^\pi_i) > 0$, because every term is non-negative and at least one is positive. That contradicts optimality. The maximum of a linear function over a convex hull equals its maximum over the points, so $\mathbf{V}^\pi$ lies on the supporting hyperplane $\lbrace \mathbf{x} : \mathbf{w}^\top \mathbf{x} = \mathbf{w}^\top \mathbf{V}^\pi \rbrace$, which meets the hull only on its boundary.
+
+(b) The mixture point with treasure 24 on the segment from $(1, -1)$ to $(124, -19)$ has $p = 23/123 = 0.187$ and value $\mathbf{m} = (24, -1 - 18p) = (24, -4.37)$: the same treasure in far less time. For every $\mathbf{w} \ge 0$, $\mathbf{w}^\top (24, -13) \le \mathbf{w}^\top \mathbf{m} = (1 - p)\, \mathbf{w}^\top (1, -1) + p\, \mathbf{w}^\top (124, -19) \le \max\lbrace \mathbf{w}^\top (1, -1), \mathbf{w}^\top (124, -19)\rbrace$, with strict first inequality whenever the time weight is positive; for $\mathbf{w} = (1, 0)$ simply $24 < 124$. The tie solves $w_1 - (1 - w_1) = 124 w_1 - 19(1 - w_1)$, that is $141 w_1 = 18$, $w_1 = 0.1277$, which is where the script's exact sweep switches (between $w_1 = 0.127$ and $0.128$).
+
+(c) With $\mathbf{w} = (1, 0)$ time is free. Every policy that eventually reaches the 124 treasure is optimal, including dominated ones such as a 25-step path worth $(124, -25)$, and a greedy policy may even wander forever among equally valued actions. With zero weights allowed, scalarized optima are only *weakly* Pareto-optimal; a tiny positive weight on every objective breaks the ties in favour of the Pareto-optimal policy.
+
+</details>
+
+**Exercise 19 ★★ (a reward machine and its product MDP).** A corridor has cells 0, 1, 2, 3. The agent starts in cell 1 and moves left or right deterministically (a move into an end wall leaves it in place), and $\gamma = 0.9$. The task is "visit cell 0, then reach cell 3": entering cell 3 after cell 0 has been visited pays 1 and ends the episode, and entering cell 3 earlier pays nothing. (a) Write the task as a two-state reward machine and describe the product MDP. (b) Find the optimal value from the start. (c) Show that every deterministic policy that sees only the cell has value 0. (d) Can a stochastic policy of the cell alone do better, and can it reach the optimum?
+
+<details><summary>Solution</summary>
+
+(a) Machine states $u_0$ ("cell 0 not yet visited") and $u_1$ ("visited"). The event "entered cell 0" moves $u_0 \to u_1$; in $u_1$ the event "entered cell 3" emits reward 1 and ends the episode; every other transition keeps $u$ and pays 0. The product has the 8 states $(c, u)$, and its rewards and transitions depend only on $(c, u)$ and the action, so it is an MDP.
+
+(b) From $(1, u_0)$: left to $(0, u_1)$, then right three times. The reward arrives on the fourth transition, so the optimal value is $\gamma^3 = 0.729$.
+
+(c) A deterministic policy of the cell chooses one action in cell 1, and both choices fail. If it goes right in cell 1, it can never pass cell 1 leftwards, so it never visits cell 0. If it goes left in cell 1, it reaches cell 0 but can never pass cell 1 rightwards, so it never reaches cell 3. Either way the value is 0.
+
+(d) Randomizing in cell 1 lets the agent eventually do both. It cannot reach the optimum: the only way to collect the reward on the fourth transition is left, right, right, right, which goes left from cell 1 at the first visit and right at the second, with probability 1 each time, and a policy of the cell must use the same probabilities at both visits. `exercise_solutions.py` (`ex19`) finds the best stochastic memoryless policy numerically: it is worth 0.382 (the uniform random policy 0.284), far below 0.729. The machine state is exactly the one bit of memory the task needs.
+
+</details>
+
+**Exercise 20 ★★ (an epistemic POMDP).** A corridor has cells $-2, \dots, 2$; the agent starts in cell 0, and $\gamma = 0.9$. There are two equally likely contexts. In context L the goal is cell $-2$, in context R it is cell $+2$. Entering the goal pays 1 and ends the episode; entering the other end pays nothing. The agent observes its cell, never the context. (a) What is the optimal value in each context, and what is the Bayes-optimal value when the context is unknown? (b) Show that the best deterministic memoryless policy is worth 0.45. (c) Why must the Bayes-optimal policy depend on the history? Compare with the best stochastic memoryless policy.
+
+<details><summary>Solution</summary>
+
+(a) With the context known, the goal is two steps away and the reward comes on the second transition: $\gamma = 0.9$. With the context unknown, go left. With probability $\tfrac12$ the goal is there (value $\gamma$); otherwise the agent has learned that the context is R and walks four cells right, so the reward comes on the sixth transition ($\gamma^5 = 0.590$). The value is $\tfrac12(0.9 + 0.590) = 0.745$, and by symmetry going right first is no better.
+
+(b) A deterministic memoryless policy that reaches cell $-2$ must go left in cells 0 and $-1$. In context R it must then pass cell $-1$ going right, but the policy sends it left again, so it shuttles between $-2$ and $-1$ forever. Its value is $\tfrac12 \gamma = 0.45$ (and symmetrically for the mirror policy); policies that reach neither end are worth 0.
+
+(c) In cell $-1$ the right action is "left" before the agent has seen cell $-2$ and "right" afterwards: one observation, two required actions, so the optimal policy needs one bit of memory. `exercise_solutions.py` (`ex20`) finds the best stochastic memoryless policy numerically: value 0.527, with $\Pr\lbrace\text{right}\rbrace = 1, 0.277, 0.5, 0.723, 0$ in cells $-2, \dots, 2$. Randomization buys part of the value of memory, not all of it. This is Ghosh et al.'s point (Section 10.3): each context is a fully observed MDP, and the memoryless policy optimal for either one alone scores 0.45 here, yet uncertainty about *which* context the agent is in makes the test problem a POMDP.
+
+</details>
+
+**Exercise 21 ★★ (prioritized level replay by hand).** Four seen levels have scores $(0.5, 0.2, 0.05, 0.3)$, and it has been $(1, 10, 30, 4)$ episodes since each was last played. (a) With $\beta_{\text{PLR}} = 1$ and $\rho_{\text{PLR}} = 0.1$, compute $P_S$, $P_C$ and $P_{\text{replay}}$ of Algorithm 15.14. (b) Repeat for $\beta_{\text{PLR}} = 0.1$, the value used in the PLR paper and in `procgen_lite.py`. (c) Why score levels by a value loss rather than by the return, and what happens to a level the agent can never solve? (d) What would go wrong without the staleness term?
+
+<details><summary>Solution</summary>
+
+(a) The ranks are $(1, 3, 4, 2)$, so $h = (1, \tfrac13, \tfrac14, \tfrac12)$, with sum $2.083$, and $P_S = (0.48, 0.16, 0.12, 0.24)$. The staleness distribution is $P_C = (1, 10, 30, 4)/45 = (0.022, 0.222, 0.667, 0.089)$. Then $P_{\text{replay}} = 0.9\, P_S + 0.1\, P_C = (0.434, 0.166, 0.175, 0.225)$.
+
+(b) Now $h^{1/\beta_{\text{PLR}}} = h^{10} = (1, 1.7 \times 10^{-5}, 9.5 \times 10^{-7}, 9.8 \times 10^{-4})$, so $P_S$ is essentially one-hot on the top-ranked level, and $P_{\text{replay}} = (0.901, 0.022, 0.067, 0.010)$. The staleness term is almost all that keeps the other levels in play. `exercise_solutions.py` (`ex21`) reproduces both rows with `procgen_lite.PLRSampler`.
+
+(c) The return measures how good the agent is on a level, not how much it can still learn there. A level it always solves and a level it never solves both have stable returns. A value loss is large where returns are still changing, at the edge of the agent's ability. On a level the agent can never solve, every return is 0, the critic learns to predict 0, and the advantages vanish, so the score is near 0 and the level is rarely replayed. The positive value loss counts only outcomes that were *better* than the critic expected, which estimates how much better the agent could do, its regret; it ignores bad surprises that may be pure noise.
+
+(d) Scores are measured under an old policy. A level that scored low long ago may be learnable now, and a high score may be obsolete. Without staleness, a few levels with high recorded scores would absorb nearly all the replay, as (b) shows. Even with it, in `procgen_lite.py` PLR spent 34% of its training episodes on the most-played 10% of 64 levels, and 46% for 256 levels (uniform sampling: 10% and 12%).
+
+</details>
+
 ---
 
 ## Further reading
@@ -1483,5 +1757,8 @@ In RL the inner gradient is a stochastic estimate that also depends on $\theta$ 
 * **A. Barreto, S. Hou, D. Borsa, D. Silver and D. Precup (2020), "Fast reinforcement learning with generalized policy updates", *PNAS*.** An accessible overview of successor features and GPI by their authors.
 * **J. Beck et al. (2023), "A survey of meta-reinforcement learning", arXiv.** A thorough map of black-box, gradient and inference methods, task distributions and benchmarks.
 * **M. Ghavamzadeh, S. Mannor, J. Pineau and A. Tamar (2015), "Bayesian reinforcement learning: a survey", *Foundations and Trends in Machine Learning*.** The Bayes-adaptive view of Section 7.2 in depth.
+* **A. Touati and Y. Ollivier (2021), "Learning one representation to optimize all rewards", NeurIPS.** Forward-backward representations; read it with Touati, Rapin & Ollivier (2023), "Does zero-shot reinforcement learning exist?", ICLR, which compares them with successor features on many feature maps.
+* **C. F. Hayes et al. (2022), "A practical guide to multi-objective reinforcement learning and planning", *Autonomous Agents and Multi-Agent Systems* 36.** Utility functions, SER versus ESR, and when a convex coverage set is enough.
 * **K. Khetarpal, M. Riemer, I. Rish and D. Precup (2022), "Towards continual reinforcement learning: a review and perspectives", JAIR.** Definitions, settings and open problems for continual RL.
 * **M. Laskin et al. (2023), "In-context reinforcement learning with algorithm distillation", ICLR.** Where to start on in-context RL.
+* **R. Kirk, A. Zhang, E. Grefenstette and T. Rocktäschel (2023), "A survey of zero-shot generalisation in deep reinforcement learning", JAIR 76.** Contextual MDPs, benchmarks and methods for generalizing across environments.

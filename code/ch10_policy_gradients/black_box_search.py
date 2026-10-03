@@ -18,7 +18,8 @@ Part A  CartPole-v1 with a deterministic LINEAR policy a = 1[theta^T s > 0] (d =
         Two likelihood-ratio references use STOCHASTIC policies and one episode per update:
           reinforce-linear  logistic policy pi(right|s) = sigmoid(theta^T s), the same 4 parameters,
                             reward-to-go with a learned linear baseline, Adam (lr 0.1, the best of
-                            {0.01, 0.03, 0.1, 0.3} in a pilot run)
+                            {0.01, 0.03, 0.1, 0.3} on these same 5 seeds, by median episodes to 475;
+                            the black-box methods were not tuned, so this favours REINFORCE)
           reinforce-mlp     the 2x64 tanh MLP with a learned baseline of reinforce_cartpole.py
         Every 16 training episodes the current policy (the mean, for CEM) is evaluated on 10 fixed
         evaluation episodes, which do not count towards the budget.  Stochastic policies are
@@ -37,7 +38,12 @@ Part B  A family of linear-quadratic problems with d = n^2 parameters (n = 2, 4,
         xi.  By the rotational symmetry of this family, exact gradient ascent with step c*n behaves
         identically for every n: any growth with d below comes from the estimator.
           B1  tr Cov(g_hat) / ||grad J||^2 at K = 0 for the plain, forward-difference and antithetic
-              estimators, sigma = 0.01, against d (and against sigma at d = 64)
+              estimators, sigma = 0.01, against d (and against sigma at d = 64 and d = 256).  Theory
+              (Exercise 10.15, to second order, with the exact Hessian H of J at K = 0):
+                plain       [d J^2/sigma^2 + (d+1)||g||^2 + (d+2) J tr H] / ||g||^2
+                antithetic  d + 1 (exact on a quadratic; J here also has O(sigma^2) cubic terms)
+                forward     antithetic + sigma^2 (d+4) ((tr H)^2 + 2||H||_F^2) / (4 ||g||^2),
+              the uncancelled curvature term (sigma^2/4) E[(xi'H xi)^2 ||xi||^2].
           B2  stochastic gradient ascent K <- K + alpha g_hat with 16 J-evaluations per iteration
               (antithetic: 8 pairs; forward: 15 perturbations + J(theta); plain: 16 perturbations),
               alpha = best of a factor-2 grid on 6 separate tuning seeds (3 for plain); iterations to reach 1%
@@ -341,12 +347,17 @@ def make_lq(n, seed=0):
 
 
 def smith(L, Q, iters=20):
-    """Batched P = sum_{t>=0} (L')^t Q L^t by doubling; converged where L^(2^iters) is ~0."""
+    """Batched P = sum_{t>=0} (L')^t Q L^t by doubling; converged where L^(2^iters) is ~0.
+
+    Stops early once every L^(2^k) in the batch is below 1e-16: the remaining terms are then far
+    below float64 resolution (this roughly halves the cost of a call and leaves J unchanged bit for bit)."""
     P, Lk = Q.copy(), L.copy()
     with np.errstate(all="ignore"):
         for _ in range(iters):
             P = P + np.swapaxes(Lk, -1, -2) @ P @ Lk
             Lk = Lk @ Lk
+            if np.abs(Lk).max() < 1e-16:          # NaN compares False, so unstable batches run on
+                break
         ok = np.isfinite(P).all((-1, -2)) & (np.abs(np.nan_to_num(Lk, nan=1.0, posinf=1.0, neginf=1.0)).max((-1, -2)) < 1e-10)
     return P, ok
 
@@ -368,6 +379,19 @@ def lq_grad(lq, K):
     Sig, _ = smith(L.T[None], S0[None])
     P, Sig = P[0], Sig[0]
     return -2 * ((Ca + GAMMA_LQ * G.T @ P @ G) @ K - GAMMA_LQ * G.T @ P @ F) @ Sig
+
+
+def lq_hessian(lq, K, h=1e-5):
+    """Hessian of J with respect to vec(K): central differences of the EXACT gradient, symmetrized."""
+    n = lq["n"]
+    d = n * n
+    H = np.zeros((d, d))
+    for i in range(d):
+        E = np.zeros(d)
+        E[i] = h
+        E = E.reshape(n, n)
+        H[:, i] = (lq_grad(lq, K + E) - lq_grad(lq, K - E)).reshape(-1) / (2 * h)
+    return (H + H.T) / 2
 
 
 def lq_opt(lq):
@@ -460,16 +484,27 @@ def part_b(quick, seed0):
         rel = abs(fd - np.sum(g * E)) / abs(np.sum(g * E))
         assert rel < 1e-6, rel
         assert np.abs(lq_grad(lq, Kstar)).max() < 1e-10
+        H = lq_hessian(lq, K0)
+        u = E / np.linalg.norm(E)                        # check H against a second difference of exact J
+        J2 = (lq_J(lq, (K0 + 1e-3 * u)[None])[0] + lq_J(lq, (K0 - 1e-3 * u)[None])[0]
+              - 2 * lq_J(lq, K0[None])[0]) / 1e-6
+        uHu = u.reshape(-1) @ H @ u.reshape(-1)
+        assert abs(J2 - uHu) < 1e-4 * abs(uHu), (J2, uHu)
+        lq["trH0"], lq["HF2_0"] = np.trace(H), np.sum(H * H)
         lqs[n] = lq
         print(f"  n={n:2d} d={n * n:3d}: J(0) = {lq_J(lq, K0[None])[0]:.4f}, J* = {lq['Jstar']:.4f}, "
-              f"||grad J(0)||^2 = {np.sum(g * g):.4g}; exact gradient vs finite differences: rel. err {rel:.1e}; "
+              f"||grad J(0)||^2 = {np.sum(g * g):.4g}, tr H(0) = {lq['trH0']:.4g}, ||H(0)||_F^2 = {lq['HF2_0']:.4g}; "
+              f"exact gradient vs finite differences: rel. err {rel:.1e}; "
               f"||grad J(K*)||_max = {np.abs(lq_grad(lq, Kstar)).max():.1e}")
 
     # B1: variance against d
     print(f"\n  B1. tr Cov(g_hat)/||grad J||^2 at K = 0 from M = {M} samples (one evaluation per plain/forward "
-          "sample, two per antithetic pair); theory: plain ~ d J^2/(sigma^2 ||grad J||^2) + (d+1), antithetic = d+1 "
-          "on a quadratic")
-    print("     d |      plain   (theory) |  forward | antithetic | d+1 | rel. error of the sample mean: plain / forward / antithetic | unstable")
+          "sample, two per antithetic pair).  Theory to second order (Exercise 10.15(c), exact Hessian H at K = 0): "
+          "plain = [d J^2/sigma^2 + (d+1)||g||^2 + (d+2) J tr H]/||g||^2 (in brackets: without the curvature term "
+          "(d+2) J tr H); antithetic = d+1 on a quadratic; forward - antithetic = sigma^2 (d+4)((tr H)^2 + 2||H||_F^2)"
+          "/(4||g||^2)")
+    print("     d |      plain   (theory; without curvature) |  forward | antithetic | d+1 | forward - antithetic (theory) "
+          "| rel. error of the sample mean: plain / forward / antithetic | unstable")
     b1 = {}
     rng = np.random.default_rng(seed0 + 2)
     for n in ns:
@@ -480,18 +515,23 @@ def part_b(quick, seed0):
         g2 = np.sum(g * g)
         row = {k: v.var(0, ddof=1).sum() / g2 for k, v in S.items()}
         err = {k: np.linalg.norm(v.mean(0) - g) / np.sqrt(g2) for k, v in S.items()}
-        theory = d * J0**2 / (sig**2 * g2) + d + 1
+        theory0 = d * J0**2 / (sig**2 * g2) + d + 1
+        theory = theory0 + (d + 2) * J0 * lq["trH0"] / g2
+        gap = sig**2 * (d + 4) * (lq["trH0"]**2 + 2 * lq["HF2_0"]) / (4 * g2)
         b1[d] = (row, theory)
-        print(f"  {d:4d} | {row['plain']:10.4g} ({theory:8.3g}) | {row['forward']:8.4g} | {row['antithetic']:10.4g} | "
-              f"{d + 1:3d} | {err['plain']:7.3f} / {err['forward']:.3f} / {err['antithetic']:.3f} | {n_bad}")
-    if 8 in lqs:
-        print("\n     sigma dependence at d = 64:   sigma |     plain |  forward | antithetic")
+        print(f"  {d:4d} | {row['plain']:10.4g} ({theory:9.4g}; {theory0:9.4g}) | {row['forward']:8.4g} | "
+              f"{row['antithetic']:10.4g} | {d + 1:3d} | {row['forward'] - row['antithetic']:7.3g} ({gap:7.3g}) | "
+              f"{err['plain']:7.3f} / {err['forward']:.3f} / {err['antithetic']:.3f} | {n_bad}")
+    for nn, m_sig in [(8, M // 4), (16, M)]:       # d = 256 uses all M samples: its effect is only ~5%
+        if nn not in lqs:
+            continue
+        print(f"\n     sigma dependence at d = {nn * nn} ({m_sig} samples):   sigma |     plain |  forward | antithetic")
         for s in [0.001, 0.003, 0.01]:
-            S, _, n_bad = estimator_samples(lqs[8], np.zeros((8, 8)), s, M // 4, rng)
-            g2 = np.sum(lq_grad(lqs[8], np.zeros((8, 8))) ** 2)
+            S, _, n_bad = estimator_samples(lqs[nn], np.zeros((nn, nn)), s, m_sig, rng)
+            g2 = np.sum(lq_grad(lqs[nn], np.zeros((nn, nn))) ** 2)
             v = {k: x.var(0, ddof=1).sum() / g2 for k, x in S.items()}
-            print(f"                                  {s:6.3f} | {v['plain']:9.4g} | {v['forward']:8.4g} | {v['antithetic']:10.4g}"
-                  f"{'' if n_bad == 0 else f'  ({n_bad} unstable)'}")
+            print(f"                                                {s:6.3f} | {v['plain']:9.4g} | {v['forward']:8.4g} | "
+                  f"{v['antithetic']:10.4g}{'' if n_bad == 0 else f'  ({n_bad} unstable)'}")
 
     # B2: convergence against d
     grids = {"exact": [0.0125 * 2**k for k in range(6)],              # step alpha = c * n
@@ -574,7 +614,7 @@ def make_figures(logs, b1, b2, ns, T):
                              "forward": ("forward (baseline $J(\\theta)$)", C[3], "D"),
                              "antithetic": ("antithetic (10.38)", C[2], "o")}.items():
         ax.plot(ds, [b1[d][0][k] for d in ds], color=col, marker=mk, label=lab)
-    ax.plot(ds, [b1[d][1] for d in ds], color=C[1], ls=":", lw=1.2, label="$dJ^2/(\\sigma^2\\|\\nabla J\\|^2)+d+1$")
+    ax.plot(ds, [b1[d][1] for d in ds], color=C[1], ls=":", lw=1.2, label="plain, theory (Exercise 10.15(c))")
     ax.plot(ds, [d + 1 for d in ds], color=C[2], ls=":", lw=1.2, label="$d+1$")
     ax.set_xscale("log", base=2)
     ax.set_yscale("log")

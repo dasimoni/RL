@@ -14,13 +14,14 @@ The two halves share one enemy: **distribution shift**. A learned policy visits 
 **Learning objectives.** After this chapter you should be able to:
 
 1. Treat behaviour cloning (BC) as supervised learning, prove that its excess cost can grow as $\epsilon T^2$ with the horizon $T$, and prove that training on the learner's own state distribution, as DAgger does, brings this down to $u T \epsilon$.
-2. Explain why reward recovery is ill-posed. Derive apprenticeship learning by feature matching and maximum-entropy IRL, including the gradient "expert feature counts minus model feature counts".
-3. Derive GAIL's objective as a Jensen–Shannon divergence between occupancy measures, and explain what AIRL adds.
-4. State the offline RL problem and explain, with a worked example and an experiment, why off-policy algorithms such as DQN fail on fixed data (extrapolation error).
-5. Derive and compare the main families of offline RL: policy constraints (BCQ, BEAR, BRAC, TD3+BC), conservative values (CQL, including its lower-bound theorem), in-sample learning (IQL via expectile regression, AWR/AWAC), uncertainty penalties, and model-based methods (MOPO, MOReL). Implement discrete BCQ, CQL and IQL.
-6. Explain offline RL as sequence modelling (Decision Transformer, Trajectory Transformer) and show on small examples why it cannot stitch trajectories and is fooled by luck.
-7. Derive and compare off-policy evaluation estimators: importance sampling and its weighted and per-decision variants, fitted Q evaluation, and doubly robust estimators.
-8. Describe the D4RL benchmark, offline-to-online fine-tuning, and how these ideas reappear in RLHF ([Chapter 18](18-rl-for-language-models.md)).
+2. Explain why BC with a unimodal policy averages the modes of multimodal demonstrations, and how mixture, tokenised, energy-based, diffusion and flow-matching policies and action chunking avoid it. State the diffusion-policy training loss and sampler and explain why training them is still behaviour cloning, and describe the generalist robot policies trained mainly by BC (RT-2, Octo, OpenVLA, $\pi_0$).
+3. Explain why reward recovery is ill-posed. Derive apprenticeship learning by feature matching and maximum-entropy IRL, including the gradient "expert feature counts minus model feature counts".
+4. Derive GAIL's objective as a Jensen–Shannon divergence between occupancy measures, and explain what AIRL adds.
+5. State the offline RL problem and explain, with a worked example and an experiment, why off-policy algorithms such as DQN fail on fixed data (extrapolation error).
+6. Derive and compare the main families of offline RL: policy constraints (BCQ, BEAR, BRAC, TD3+BC), conservative values (CQL, including its lower-bound theorem), in-sample learning (IQL via expectile regression, AWR/AWAC), uncertainty penalties, and model-based methods (MOPO, MOReL). Implement discrete BCQ, CQL and IQL.
+7. Explain offline RL as sequence modelling (Decision Transformer, Trajectory Transformer, diffusion planners) and show on small examples why it cannot stitch trajectories and is fooled by luck.
+8. Derive and compare off-policy evaluation estimators: importance sampling and its weighted and per-decision variants, fitted Q evaluation, and doubly robust estimators.
+9. Describe the D4RL benchmark, offline-to-online fine-tuning, and how these ideas reappear in RLHF ([Chapter 18](18-rl-for-language-models.md)).
 
 **Prerequisites.** MDPs, Bellman equations and the occupancy-measure (dual LP) view ([Chapters 01](01-the-rl-problem.md), [03](03-dynamic-programming.md)); importance sampling, weighted and per-decision IS ([Chapter 04](04-monte-carlo.md)); Q-learning ([Chapter 05](05-temporal-difference.md)); the deadly triad ([Chapter 08](08-function-approximation.md)); DQN ([Chapter 09](09-deep-q-learning.md)); policy gradients and the performance-difference lemma ([Chapters 10](10-policy-gradients.md)–[11](11-trust-regions-and-ppo.md)); TD3 and soft (maximum-entropy) RL ([Chapter 12](12-continuous-control-actor-critic.md)); learned models ([Chapter 13](13-model-based-rl.md)). Maximum likelihood, cross-entropy and KL divergence are reviewed in [Chapter 00](00-math-toolkit.md).
 
@@ -29,15 +30,16 @@ The two halves share one enemy: **distribution shift**. A learned policy visits 
 | Script | What it shows | Full run |
 |---|---|---|
 | [`dagger_vs_bc.py`](../code/ch16_offline_rl_and_imitation/dagger_vs_bc.py) | Compounding errors on an unstable "tightrope": BC's excess cost grows much faster with the horizon $T$ than DAgger's, and DAgger needs about ten times fewer expert labels | ~2–2.5 min |
+| [`multimodal_bc.py`](../code/ch16_offline_rl_and_imitation/multimodal_bc.py) | Bimodal demonstrations around an obstacle: MSE-BC and a Gaussian average the modes and collide; mixtures can collapse to one broad component; binned actions and a diffusion policy (with and without action chunks) pass on both sides; equal-budget controls show how much the mixture and the diffusion policy depend on training length | ~6 min |
 | [`irl_gridworld.py`](../code/ch16_offline_rl_and_imitation/irl_gridworld.py) | Apprenticeship learning (projection method) and MaxEnt IRL on a terrain gridworld; the recovered reward transfers to a changed world where BC fails | ~20 s |
 | [`offline_cartpole.py`](../code/ch16_offline_rl_and_imitation/offline_cartpole.py) | Expert, medium and random datasets on CartPole-v1; BC, naive offline DQN (Q-values blow up past $10^5$), discrete BCQ, CQL and IQL | ~5–6 min |
 | [`offline_sensitivity.py`](../code/ch16_offline_rl_and_imitation/offline_sensitivity.py) | CQL's $\alpha$ and IQL's $(\tau, \beta)$ swept on two datasets: the safe settings shift with the data, and IQL's upper expectile inflates values even on expert data | ~7 min |
 | [`cql_tabular.py`](../code/ch16_offline_rl_and_imitation/cql_tabular.py) | Numerical check of the CQL lower-bound theorems in a table, exact and with finite data | ~5 s |
 | [`sequence_vs_dp.py`](../code/ch16_offline_rl_and_imitation/sequence_vs_dp.py) | Return-conditioned supervised learning (the idea behind Decision Transformer) vs dynamic programming: stitching and luck | <1 s |
 | [`ope_tabular.py`](../code/ch16_offline_rl_and_imitation/ope_tabular.py) | IS, WIS, PDIS, WPDIS, FQE, DR and WDR against the true value of a target policy; data size, horizon and policy mismatch | ~1 min |
-| [`exercise_solutions.py`](../code/ch16_offline_rl_and_imitation/exercise_solutions.py) | Numerical checks for the exercises, including tabular GAIL | ~16 s |
+| [`exercise_solutions.py`](../code/ch16_offline_rl_and_imitation/exercise_solutions.py) | Numerical checks for the exercises, including tabular GAIL and a policy gradient through a denoising chain | ~17 s |
 
-**Study time.** About 12–14 hours: 7 for the text and derivations, 2–3 to run and modify the code, 3–4 for the exercises.
+**Study time.** About 13–15 hours: 8 for the text and derivations, 2–3 to run and modify the code, 3–4 for the exercises.
 
 **Notation.** We follow [NOTATION.md](../NOTATION.md), with these local departures, each repeated where it first matters.
 
@@ -51,6 +53,7 @@ The two halves share one enemy: **distribution shift**. A learned policy visits 
 * $\epsilon$ in Section 2 is a learner's *classification error rate* (as in Ross & Bagnell), not an exploration rate. In Section 2.5, $N$ is the number of DAgger iterations and $\beta_i$ its mixing weights, as in Ross, Gordon and Bagnell; elsewhere $N$ is a dataset size and $\beta$ an inverse temperature.
 * $Q^\ast_t, V^\ast_t$ in Section 2.5 are the **expert's** cost-to-go, not the optimal values $q_\ast, v_\ast$. In Sections 8–12, $Q^\pi, V^\pi, A^b$ (capitals) are *true* values of $\pi$ or $b$, as in the offline-RL papers; NOTATION.md writes $q_\pi, v_\pi$.
 * $\psi$ is used only for GAIL's cost regulariser (Section 5.1, as in Ho and Ermon), not for model parameters. Discriminator parameters are $\boldsymbol\xi$, and IQL's value network has weights $\mathbf{w}_V$.
+* Section 2.8 keeps the diffusion literature's symbols, flagged again there: $k = 1, \dots, K$ counts *denoising* steps (as a superscript, $a^k$), $\beta_k$, $\alpha_k = 1 - \beta_k$ and $\bar\alpha_k$ are the noise schedule, $\boldsymbol\epsilon$ (bold) and $\mathbf z$ are Gaussian noise (not an eligibility trace), $\sigma_k$ is the sampler's noise level, $u \in [0, 1]$ is flow matching's interpolation time (not the recoverability constant $u$ of (16.7)), $M$ is the number of mixture components and $H_c$ the length of an action chunk.
 * $\alpha$ is a step size up to Section 7 and CQL's conservatism weight in Sections 8–9, where pseudocode writes the step size as `lr`. $\lambda$ names several scalar weights (GAIL's entropy weight, TD3+BC's $Q$ scale, MOPO's penalty, Lagrange multipliers), each defined where it is used; it is never a trace-decay parameter.
 
 ---
@@ -86,7 +89,7 @@ $$
 \tag{16.1}
 $$
 
-For discrete actions this is the cross-entropy loss of a classifier. For a Gaussian policy with fixed variance it is mean-squared error on the actions. As [Chapter 00](00-math-toolkit.md) showed, maximum likelihood minimises the *forward* KL divergence $\mathbb{E}_{s}\big[D_{\mathrm{KL}}(\pi^\ast(\cdot\mid s)\,\Vert\,\pi_{\boldsymbol\theta}(\cdot \mid s))\big]$ over the data's states. Forward KL is mode-covering. A unimodal policy fitted to an expert who passes an obstacle sometimes on the left and sometimes on the right averages the two and drives into it. Mixture, discretised, energy-based or diffusion policies avoid this.
+For discrete actions this is the cross-entropy loss of a classifier. For a Gaussian policy with fixed variance it is mean-squared error on the actions. As [Chapter 00](00-math-toolkit.md) showed, maximum likelihood minimises the *forward* KL divergence $\mathbb{E}_{s}\big[D_{\mathrm{KL}}(\pi^\ast(\cdot\mid s)\,\Vert\,\pi_{\boldsymbol\theta}(\cdot \mid s))\big]$ over the data's states. Forward KL is mode-covering. A unimodal policy fitted to an expert who passes an obstacle sometimes on the left and sometimes on the right averages the two and drives into it. Mixture, discretised, energy-based or diffusion policies avoid this (Section 2.8).
 
 ```
 Algorithm 16.1: Behaviour cloning
@@ -252,7 +255,114 @@ Label efficiency is the practical argument. With 1,000 labels DAgger reaches an 
 * **When the expert is a human,** labelling every visited state is tedious and labels given without being in control are unreliable. Variants let the expert intervene only when the learner is about to fail (for example HG-DAgger, Kelly et al., 2019), or inject noise into the *expert's* demonstrations so that the data contain recoveries (DART, Laskey et al., 2017).
 * **Causal confusion.** More information can hurt BC. If the observation shows the brake light, a cloned driver learns "brake when the brake light is on", a perfect predictor of the expert's action that is useless as a policy (de Haan, Jayaraman & Levine, 2019).
 * **Privileged experts.** In simulation an expert with access to the true state can label a student that sees only sensors, as in our tightrope, an approach used for autonomous driving under the name "learning by cheating" (Chen et al., 2019).
-* **Modern BC.** With expressive policy classes (mixtures, discretised actions, diffusion models) and plenty of data, BC is the workhorse of robot learning. The horizon problem is mitigated by predicting *chunks* of future actions and by data that include recoveries. It is also the first stage of every large language model's training (supervised fine-tuning, [Chapter 18](18-rl-for-language-models.md)).
+* **Modern BC.** With expressive policy classes and plenty of data, BC is the workhorse of robot learning, and it is the first stage of every large language model's training (supervised fine-tuning, [Chapter 18](18-rl-for-language-models.md)). Section 2.8 covers the policy classes, action chunking and the generalist robot policies trained this way.
+
+### 2.8 Expressive and generalist policies
+
+**Mode averaging.** Go back to the obstacle of Section 2.1. Suppose that in some state the expert steers left half the time and right half the time. MSE regression, which is (16.1) with a fixed-variance Gaussian, learns the conditional mean of the action, so it steers straight ahead. Learning the variance as well does not help. Maximum likelihood minimises the forward KL divergence, and for a single Gaussian that means matching the mean and variance of the expert's actions ([Chapter 00](00-math-toolkit.md) §5.4). The fitted Gaussian sits between the two modes and is wide enough to cover both, so many of its samples land where the expert never acts (Exercise 16.15 computes how many). Maximum likelihood is still the right objective. What fails is a model class that cannot represent the answer. And human demonstrations are routinely multimodal: different demonstrators, or the same one on different days, solve a task in different ways, and the state rarely records which way was chosen. Several policy classes can represent more than one mode.
+
+* **Mixtures.** A mixture density network (MDN; Bishop, 1994) outputs the weights $w_j(s)$, means $\mathbf m_j(s)$ and covariances $\mathbf S_j(s)$ of $M$ Gaussians, $\pi_{\boldsymbol\theta}(a\mid s) = \sum_{j=1}^{M} w_j(s)\,\mathcal N\big(a;\mathbf m_j(s),\mathbf S_j(s)\big)$, and is trained by (16.1). It is cheap to train and to sample. Its likelihood has poor stationary points, though, in which one broad component covers several modes, and training can stay near one for a long time; the experiment below runs into this.
+* **Discretised (tokenised) actions.** Divide each action dimension into bins and predict a categorical distribution over them, which can put mass on any number of modes. RT-1 and RT-2 use 256 bins per dimension. RT-1 predicts every dimension at once, with an independent softmax for each; its authors tried generating the dimensions one at a time and found that this slowed inference about twofold without changing performance significantly. RT-2 writes the dimensions as a sequence of text tokens, so each is predicted conditioned on those already chosen. That keeps the correlations between dimensions that independent softmaxes lose. Behavior Transformers (Shafiullah, Cui, Altanzaya & Pinto, 2022) cluster the dataset's actions with $k$-means, predict the cluster with a categorical head and add a predicted continuous offset within the cluster.
+* **Implicit (energy-based) policies.** Implicit BC (Florence et al., 2021) learns an energy $E_{\boldsymbol\theta}(s,a)$ with $\pi(a\mid s)\propto e^{-E_{\boldsymbol\theta}(s,a)}$, trained with a contrastive loss against sampled counter-example actions, and acts by minimising the energy over actions. It can represent discontinuous and multi-valued maps, but both training and acting need a search over actions.
+* **Diffusion and flow-matching policies** turn a sample of noise into an action by a learned iterative refinement. They are among the most widely used expressive classes in robot learning today, so we derive them.
+
+**Diffusion policies.** A denoising diffusion probabilistic model (DDPM; Sohl-Dickstein, Weiss, Maheswaranathan & Ganguli, 2015; Ho, Jain & Abbeel, 2020) learns to reverse a process that adds Gaussian noise to the data a little at a time. In a diffusion policy (Chi et al., 2023) the data are expert actions $a^0 = a$, and every network is conditioned on the state. Choose a noise schedule $0 < \beta_k < 1$ for $k = 1, \dots, K$, and write $\alpha_k \doteq 1 - \beta_k$ and $\bar\alpha_k \doteq \prod_{j\le k}\alpha_j$. (These are DDPM's symbols, kept because every paper uses them. In this subsection only, $\alpha_k$, $\bar\alpha_k$ and $\beta_k$ are the noise schedule, not a step size, CQL's weight or an inverse temperature; the superscript $k$ counts denoising steps, not time; and the bold $\boldsymbol\epsilon$ is Gaussian noise, not the error rate of Section 2.3.) After $k$ noising steps the action can be sampled in one shot,
+
+$$
+a^k = \sqrt{\bar\alpha_k}\,a^0 + \sqrt{1-\bar\alpha_k}\;\boldsymbol\epsilon, \qquad \boldsymbol\epsilon\sim\mathcal N(\mathbf 0,\mathbf I),
+\tag{16.43}
+$$
+
+and the schedule makes $\bar\alpha_K \approx 0$, so $a^K$ is almost pure noise. A network $\boldsymbol\epsilon_{\boldsymbol\theta}(a^k, k, s)$ learns to predict the noise that was added:
+
+$$
+L(\boldsymbol\theta) = \mathbb E_{(s,a^0)\sim\mathcal D,\ k\sim\mathcal U\{1,\dots,K\},\ \boldsymbol\epsilon\sim\mathcal N(\mathbf 0,\mathbf I)}\Big[\big\lVert\boldsymbol\epsilon - \boldsymbol\epsilon_{\boldsymbol\theta}\big(\sqrt{\bar\alpha_k}\,a^0 + \sqrt{1-\bar\alpha_k}\,\boldsymbol\epsilon,\ k,\ s\big)\big\rVert^2\Big].
+\tag{16.44}
+$$
+
+To act, start from noise and denoise $K$ times:
+
+$$
+a^K\sim\mathcal N(\mathbf 0,\mathbf I), \qquad a^{k-1} = \frac{1}{\sqrt{\alpha_k}}\Big(a^k - \frac{\beta_k}{\sqrt{1-\bar\alpha_k}}\,\boldsymbol\epsilon_{\boldsymbol\theta}(a^k,k,s)\Big) + \sigma_k\mathbf z, \quad \mathbf z\sim\mathcal N(\mathbf 0,\mathbf I),
+\tag{16.45}
+$$
+
+with $\sigma_k^2 = \beta_k(1-\bar\alpha_{k-1})/(1-\bar\alpha_k)$, which is 0 at $k = 1$ (where $\bar\alpha_0 \doteq 1$). Implementations usually also clip the implied estimate of $a^0$ to the action range at every step, as ours does.
+
+```
+Algorithm 16.18: Diffusion policy (DDPM; after Chi et al., 2023)
+Input: demonstrations D = {(s_i, a_i)} (each a_i may be a chunk of H_c future actions),
+       noise schedule beta_1, ..., beta_K, noise-prediction network eps_theta(a, k, s)
+alpha_k <- 1 - beta_k;  abar_k <- alpha_1 * ... * alpha_k;  sigma_k^2 <- beta_k (1 - abar_{k-1}) / (1 - abar_k)
+Training: repeat
+    sample (s, a0) from D, k uniformly from {1, ..., K}, eps ~ N(0, I)
+    a_k <- sqrt(abar_k) a0 + sqrt(1 - abar_k) eps                                   (Eq. 16.43)
+    theta <- theta - lr * grad_theta || eps - eps_theta(a_k, k, s) ||^2              (Eq. 16.44)
+Acting in state s:
+    a <- sample from N(0, I)
+    for k = K, ..., 1:
+        a <- (a - beta_k / sqrt(1 - abar_k) * eps_theta(a, k, s)) / sqrt(alpha_k) + sigma_k z,   z ~ N(0, I)   (Eq. 16.45)
+    execute a (for a chunk: execute some or all of its actions, then act again)
+```
+
+Why is this still behaviour cloning? Ho et al. showed that (16.44) is a reweighted form of a variational lower bound on $\log\pi_{\boldsymbol\theta}(a\mid s)$, so training is approximately maximum likelihood, (16.1) again. It is also *denoising score matching* (Vincent, 2011): the best noise predictor is a scaled score, $\boldsymbol\epsilon_{\boldsymbol\theta}(a^k,k,s) \approx -\sqrt{1-\bar\alpha_k}\,\nabla_{a^k}\log q_k(a^k\mid s)$, where $q_k$ is the distribution of noised expert actions. Each reverse step (16.45) moves a little uphill on the log-density of the noised actions and adds fresh noise. None of this assumes a single mode. The score of a bimodal density points towards the nearer mode, and the initial noise, together with the noise injected in the early, very noisy steps, decides which mode a sample ends up in. The price is $K$ network evaluations per action; deterministic samplers such as DDIM (Song, Meng & Ermon, 2021) need far fewer steps.
+
+**Flow matching** (Lipman, Chen, Ben-Hamu, Nickel & Le, 2023; rectified flow, Liu, Gong & Liu, 2023) replaces the stochastic chain by an ordinary differential equation. Join a noise sample $\mathbf z$ to an expert action by a straight line, $a^u = u\,a + (1-u)\,\mathbf z$ for an interpolation time $u \in [0, 1]$ (not the $u$ of (16.7)), and regress a velocity field onto the direction of that line:
+
+$$
+L(\boldsymbol\theta) = \mathbb E_{(s,a)\sim\mathcal D,\ u\sim\mathcal U[0,1],\ \mathbf z\sim\mathcal N(\mathbf 0,\mathbf I)}\big\lVert \mathbf v_{\boldsymbol\theta}(a^u, u, s) - (a - \mathbf z)\big\rVert^2 .
+\tag{16.46}
+$$
+
+To act, draw $\mathbf z$ and integrate $da^u/du = \mathbf v_{\boldsymbol\theta}(a^u, u, s)$ from $u = 0$ to $u = 1$ with a few Euler steps. The $\pi_0$ model below generates its actions this way.
+
+**Action chunking.** Diffusion Policy and ACT (Action Chunking with Transformers; Zhao, Kumar, Levine & Finn, 2023) predict a *chunk* of the next $H_c$ actions, $a_{t:t+H_c-1}$, and execute several of them before asking the policy again. This has three effects.
+
+1. *Commitment.* A multimodal policy sampled afresh at every step can switch modes from one step to the next when the state does not reveal which mode it is following, and the zig-zag can average the modes after all. A chunk commits to one mode for $H_c$ steps.
+2. *Fewer decisions.* The argument of Theorem 16.1 counts decisions. If the policy decides once per chunk and a whole chunk is wrong with probability $\epsilon_{\text{chunk}}$, the same proof gives an excess cost of at most $T\cdot(T/H_c)\cdot\epsilon_{\text{chunk}}$, against $T\cdot T\cdot\epsilon$ for a policy that decides every step with error rate $\epsilon$. Chunking helps when $\epsilon_{\text{chunk}}$ is well below $H_c\,\epsilon$. That is the value it would take if the per-step errors were rare and independent, and it is not reached when most per-step errors are mode switches, which a chunk avoids by construction.
+3. *Pauses and other non-Markovian habits* of human demonstrators are easier to imitate across a chunk than one step at a time.
+
+The cost is that nothing that happens inside a chunk can change the actions already committed to: within a chunk the policy runs open loop. ACT's *temporal ensembling* recovers some reactivity. It queries the policy at every step and executes an exponentially weighted average of the actions that the overlapping chunks predict for the current step.
+
+**Experiment.** [`multimodal_bc.py`](../code/ch16_offline_rl_and_imitation/multimodal_bc.py) builds the obstacle of Exercise 16.1(c) in two dimensions. A point starts at $(x_0, 0)$ with $x_0\sim\mathcal U(-0.02, 0.02)$ and must reach $y = 1$ through a gate $|x| \le 0.15$ without touching a disk of radius 0.2 centred at $(0, 0.55)$. An action is a displacement $(dx, dy)$ with $|dx|, |dy| \le 0.12$, and each move adds Gaussian noise with standard deviation 0.004. The expert moves up by 0.05 per step. At the start of each episode it flips a coin, which the learner never sees, and at $y = 0.3$, just below the obstacle, it detours 0.3 to the left or to the right in three steps of 0.1. At the decision state $(0, 0.3)$ its action is therefore $dx = \pm0.1$, and the average, $dx = 0$, leads into the obstacle. Seven learners see only the state $(x, y)$, all small MLPs (two hidden layers of 128 units, on $(x,y)$ plus Fourier features of it) trained on the same 200 demonstrations: MSE regression; a Gaussian with learned variance; MDNs with 2 and 5 components; 41 bins per action dimension; a DDPM with $K = 20$ and a cosine noise schedule (Algorithm 16.18); and the same DDPM predicting chunks of $H_c = 4$ actions that are executed open loop. Stochastic policies are sampled. The two DDPMs are trained for 16,000 gradient steps, the others for 4,000, so two controls swap these budgets: a DDPM trained for 4,000 steps and a five-component MDN trained for 16,000. Each learner is rolled out 500 times for each of 3 seeds (new data and initialisation per seed).
+
+![Rollouts of seven behaviour-cloning policies on the bimodal obstacle task, and their action distributions at the decision state](../code/ch16_offline_rl_and_imitation/figures/multimodal_bc.png)
+
+*Figure 16.10. Sixty rollouts of the expert and of each learner (first seed), coloured by the side on which they passed the obstacle; collisions are red, other failures grey. The two equal-budget controls are not shown. Bottom right: the distribution of $dx$ at the decision state $(0, 0.3)$, pooled over the three seeds (symmetric-log scale).*
+
+| policy | collisions | success | passed left (of successes) | policy queries per episode | samples with $\lvert dx\rvert < 0.05$ at the decision state |
+|---|---|---|---|---|---|
+| expert | 0% | 100% | 49% | 20.5 | 12% |
+| MSE | **65%** (59–74%) | 35% | 60% | 12.1 | 100% |
+| Gaussian | 45% (41–48%) | 55% | 57% | 14.7 | 37% |
+| MDN, 2 components | 48% (46–50%) | 52% | 50% | 14.4 | 36% |
+| MDN, 5 components | 30% (1–45%) | 70% | 54% | 16.7 | 24% |
+| 41 bins per dimension | **0.5%** (0.4–0.8%) | 97% | 55% | 21.3 | 0% |
+| DDPM (16,000 steps) | **1.7%** (1.4–2.0%) | 98% | 53% | 20.3 | 2% |
+| DDPM, chunks of 4 (16,000 steps) | 3.2% (2.8–3.4%) | 97% | 53% | **5.4** | 1% |
+| *control:* DDPM, 4,000 steps | 16.5% (13.6–18.4%) | 83.5% | 54% | 18.3 | 13% |
+| *control:* MDN, 5 components, 16,000 steps | **0%** (0–0%) | 100% | 52% | 20.5 | 0% |
+
+*Means over 3 seeds × 500 rollouts; the range over seeds is in brackets. Unless stated otherwise, learners are trained for 4,000 gradient steps. An episode ends at a collision, which is why the failing policies are queried fewer times. The expert's 12% are steps taken slightly below $y = 0.3$, where its detour has only partly begun.*
+
+* **Averaging is fatal, but not always.** MSE-BC's action at the decision state is the mean of the two modes: $dx = -0.003$ and $+0.001$ in two seeds, and $-0.037$ in the seed whose demonstrations went left 60% of the time. It collides in 65% of rollouts. The other 35% escape because the noise breaks the symmetry. An agent that drifts slightly to one side enters the gap between the two branches of the data, where the fitted mean interpolates between $-0.1$ and $+0.1$ and pushes it further out. The middle is an unstable equilibrium, and luck decides who escapes.
+* **A unimodal Gaussian is not much better.** The maximum-likelihood Gaussian matches the mean and variance of the two modes. 37% of its samples at the decision state fall between them, close to the 38% that Exercise 16.15 predicts for an idealised version of this state, and it collides in 45% of rollouts.
+* **Mixtures can represent the answer but may not find it.** After 4,000 steps the two-component MDN was stuck at the poor solution mentioned above in every seed. At the decision state one component carries 99–100% of the weight, centred within 0.015 of zero with a standard deviation of 0.10–0.11: a single broad Gaussian again, with 36% of its samples between the modes. Five components found both modes in one seed (weights 0.52 and 0.48 on means $\pm0.1$, 1% collisions) and collapsed in the same way in the other two (44–45% collisions).
+* **Bins and diffusion get it right.** The binned policy and the DDPM put almost no mass between the modes, collide in 0.5% and 1.7% of rollouts, and split roughly evenly between left and right (55% and 53%), as the expert does. (The binned policy's other failures, 2.1%, are runs that passed the obstacle, drifted out beyond the demonstrated paths and reached $y = 1$ outside the gate.)
+* **Equal budgets narrow the gap.** The DDPMs were given four times as many gradient steps because they needed them. With the other learners' 4,000 steps, 13% of the DDPM's samples fell between the modes and it collided in 16.5% of rollouts. Conversely, with 16,000 steps the five-component MDN found both modes in all three seeds and did not collide once in 1,500 rollouts. Its collapse after 4,000 steps was a failure of optimisation, not of the model class. Both classes can represent two modes, and on this small problem neither is clearly ahead once both are trained long enough. The binned policy needed only 4,000 steps.
+* **Chunks cut the queries almost fourfold.** The chunked DDPM asks for an action 5.4 times per episode instead of 20.3, at a slightly higher collision rate (3.2% against 1.7%). On this task the state reveals the mode one step after the decision, so there is nothing for commitment to fix, and executing four steps open loop only costs a little reactivity.
+
+On a two-dimensional action space, 41 bins per dimension are the easiest option. Diffusion and flow models earn their cost in high-dimensional action spaces, such as chunks of many joint commands, where the number of joint bins grows exponentially with the dimension and per-dimension bins lose the correlations between dimensions.
+
+**Generalist policies.** The largest policies in robot learning are trained mainly by behaviour cloning, on demonstrations pooled across many tasks, scenes and sometimes robots. Some are then fine-tuned with RL (Section 13). Everything in this section applies to them: compounding errors, multimodal demonstrations, and the remedies above.
+
+* **Gato** (Reed et al., 2022) is a 1.2-billion-parameter transformer trained by supervised learning on 604 tasks, from Atari and simulated control (using trajectories of expert RL agents) to captioning, chat and stacking blocks with a real arm. Every modality, actions included, is serialised into tokens.
+* **RT-1** (Brohan et al., 2023) is a transformer trained on 130,000 robot episodes covering more than 700 tasks, collected with 13 robots over 17 months; each action dimension is discretised into 256 bins. **RT-2** (Brohan et al., 2023, published at CoRL 2023) starts from large vision-language models and co-fine-tunes them on web vision-language data and robot trajectories, with actions written as text tokens. It coined the term *vision-language-action* (VLA) model and showed semantic generalisation that the robot data alone did not teach.
+* **Open X-Embodiment** (Open X-Embodiment Collaboration, 2024) pooled more than a million real-robot trajectories from 22 robot types and 21 institutions. Models trained on the pool (RT-X) transferred skills between robots. **Octo** (Octo Model Team, 2024) is an open-source transformer policy with a diffusion action head, trained on 800,000 of those trajectories and designed to be fine-tuned to new robots. **OpenVLA** (Kim et al., 2024) is a 7-billion-parameter open VLA (a Llama 2 language model with DINOv2 and SigLIP visual features) trained on 970,000 demonstrations. It emits discretised action tokens and outperformed the 55-billion-parameter RT-2-X by 16.5 percentage points of absolute success rate across 29 tasks. **$\pi_0$** (Black et al., 2024) adds a flow-matching "action expert" (16.46) to a pretrained vision-language model and generates chunks of 50 actions.
+* **Learning from action-free video.** Most video of people acting has no action labels. VPT (Video PreTraining; Baker et al., 2022) trained an *inverse dynamics model*, which predicts the action taken at time $t$ from frames before *and after* $t$, on a small set of Minecraft gameplay recorded with keyboard and mouse actions. Seeing the future makes this a much easier problem than BC. The model then labelled about 70,000 hours of online video, BC on those pseudo-labels produced a capable prior policy, and RL fine-tuning took it to crafting diamond tools.
+* **Multi-game Decision Transformer** (Lee et al., 2022) trained one return-conditioned transformer (Section 11) offline on 41 Atari games, holding out 5 more to test fine-tuning, and played by conditioning on high returns.
+
+These models are the robot-learning counterpart of a pretrained language model, and the analogy runs further. As for language models ([Chapter 18](18-rl-for-language-models.md)), BC (supervised fine-tuning) is the first stage, and RL fine-tuning, when it is used, comes second.
 
 ---
 
@@ -274,7 +384,7 @@ Many rewards make the same policy optimal.
 
 * **Degenerate solutions.** $r \equiv 0$ (or any constant) makes *every* policy optimal, the expert's included.
 * **Scaling.** If $\pi_E$ is optimal for $r$, it is optimal for $c\,r$ with any $c > 0$.
-* **Potential-based shaping.** For any function $\Phi: \mathcal{S}\to\mathbb{R}$, the reward $r'(s,a,s') = r(s,a,s') + \gamma\Phi(s') - \Phi(s)$ has exactly the same optimal policies (Ng, Harada & Russell, 1999). The proof is one line: along any trajectory the extra terms telescope, $\sum_t \gamma^t(\gamma\Phi(S_{t+1}) - \Phi(S_t)) = -\Phi(S_0)$ (for $\gamma < 1$ and bounded $\Phi$). So $q'_\pi(s,a) = q_\pi(s,a) - \Phi(s)$ for *every* policy, and the argmax over actions is unchanged.
+* **Potential-based shaping.** For any function $\Phi: \mathcal{S}\to\mathbb{R}$, the reward $r'(s,a,s') = r(s,a,s') + \gamma\Phi(s') - \Phi(s)$ has exactly the same optimal policies (Ng, Harada & Russell, 1999). The proof is one line: along any trajectory the extra terms telescope, $\sum_t \gamma^t(\gamma\Phi(S_{t+1}) - \Phi(S_t)) = -\Phi(S_0)$. This holds in a continuing task with $\gamma < 1$ and bounded $\Phi$. In an episodic task $\Phi$ must also be 0 at terminal states, since otherwise the sum leaves an extra $\gamma^{T}\Phi(S_T)$ that depends on where and when the episode ends. So $q'_\pi(s,a) = q_\pi(s,a) - \Phi(s)$ for *every* policy, and the argmax over actions is unchanged. [Chapter 20](20-deep-rl-in-practice.md) §2.3 proves the full theorem, including the converse (only potential-based shaping is safe for every MDP), and shows an agent that learns to jump into a pit when the terminal potential is not zeroed.
 
 For finite MDPs, Ng and Russell (2000) characterised the whole solution set. Write $\mathbf{P}_a$ for the transition matrix of action $a$ and $\mathbf{r}$ for a state-reward vector. Suppose the expert plays $a_1$ in every state (relabel the actions so that this is true). Then $\pi_E$ is optimal if and only if
 
@@ -405,7 +515,7 @@ Each iteration solves a soft RL problem exactly, which is affordable in a small 
 
 ![IRL on a gridworld](../code/ch16_offline_rl_and_imitation/figures/irl_gridworld.png)
 
-*Figure 16.3. Top: training world with the demonstrations; transfer world with the expected visits of BC and of MaxEnt IRL; true returns of all methods in both worlds. Bottom: feature-expectation gap during learning; recovered weights (solid: MAP with $\ell_2 = 0.03$; dashed: plain maximum likelihood; dotted: the true weights minus their mean); recovered reward map.*
+*Figure 16.3. Top: training world with the demonstrations; transfer world with the expected visits of BC and of MaxEnt IRL; true returns of all methods in both worlds. Bottom: feature-expectation gap during learning, for MAP MaxEnt ($\ell_2 = 0.03$, solid; levels off at 0.1945), plain maximum-likelihood MaxEnt (dotted) and the projection method (dashed, top axis), both of which level off at 0.154, the distance from $\hat{\boldsymbol\mu}_E$ to the achievable set; recovered weights (solid: MAP with $\ell_2 = 0.03$; dashed: plain maximum likelihood; dotted: the true weights minus their mean); recovered reward map.*
 
 True returns over $H = 30$ steps (higher is better):
 
@@ -1076,6 +1186,17 @@ DP learns $Q(M, \text{right}) = 10$ from $B$'s trajectories and propagates it ba
 
 **Luck.** One decision: "safe" pays 5, "gamble" pays 10 with probability 0.3 and 0 otherwise (mean 3), logged 2,000 times by a uniform policy. Every trajectory that achieved 10 gambled. Conditioned on $g_0 = 10$, RCSL gambles, for an expected return of 3. Offline DP's empirical values (safe 5.00, gamble 3.24) choose safe. In stochastic environments, conditioning on a high return conditions on *good luck*, which the policy cannot control (Paster, McIlraith & Ba, 2022). Brandfonbrener, Bietti, Buckman, Laroche and Bruna (2022) characterised when RCSL does work: near-deterministic dynamics, and data that already cover the conditioned return. In those conditions it is a strong and simple method. Otherwise, use dynamic programming.
 
+### 11.3 Diffusion models as planners and as behaviour models
+
+The diffusion models of Section 2.8 entered offline RL in two roles.
+
+**As planners.** Diffuser (Janner, Du, Tenenbaum & Levine, 2022) trains a diffusion model on whole trajectory segments from the dataset, states and actions together, $\boldsymbol\tau = (s_0, a_0, \dots, s_{H-1}, a_{H-1})$. Planning is sampling. To prefer good trajectories it samples from the tilted distribution $\tilde p(\boldsymbol\tau)\propto p(\boldsymbol\tau)\,h(\boldsymbol\tau)$ with $h(\boldsymbol\tau) = \exp\big(\hat J(\boldsymbol\tau)\big)$, where $\hat J$ is a return model trained on noised trajectories. In the sampler the tilt becomes *classifier guidance*: each denoising step's mean is shifted along the gradient of $\hat J$, $\boldsymbol\mu \leftarrow \boldsymbol\mu + c\,\sigma_k^2\nabla\hat J(\boldsymbol\mu)$, with a guidance scale $c > 0$. Start states and goals are imposed by *inpainting*: the known entries of $\boldsymbol\tau$ are overwritten after every denoising step. The agent executes the first action of the sampled plan and plans again. Decision Diffuser (Ajay, Du, Gupta, Tenenbaum, Jaakkola & Agrawal, 2023) instead conditions the diffusion model on the return (classifier-free guidance), which makes it a diffusion version of the return-conditioned models of Section 11.1. Both share the caveat of Section 11.2. Tilting a model of logged trajectories towards high return favours trajectories that were lucky as well as those that were well played, and in a stochastic environment the agent cannot reproduce the luck.
+
+**As behaviour models.** Section 9.3 extracted a policy by fitting $\pi^\ast\propto\hat b\,e^{\beta A}$ (16.35) with a weighted maximum-likelihood step (16.36). With a Gaussian policy that step averages the modes of the weighted target, exactly as MSE-BC averages the modes of the expert. Two remedies keep a diffusion model as the policy class.
+
+* *Diffusion-QL* (Wang, Hunt & Zhou, 2023) trains a diffusion policy on the BC loss (16.44) plus a term that maximises $Q(s,a)$ at the policy's sampled actions, back-propagating through the denoising chain, with the $Q$ term normalised by the average $\lvert Q\rvert$. It is TD3+BC (16.24) with the diffusion loss in place of the squared error to the logged action.
+* *IDQL* (Hansen-Estruch, Kostrikov, Janner, Kuba & Levine, 2023) leaves IQL's critic (Section 9) unchanged and separately trains a diffusion model of the behaviour policy by plain BC. To act, it samples $N$ candidate actions from the behaviour model and resamples among them with weights computed from the critic, or takes the candidate with the largest $Q$. Resampling with weights proportional to $e^{\beta(Q(s,a) - V(s))}$ would target (16.35) exactly as $N\to\infty$. Every candidate is an action the behaviour model considers plausible, so the critic is rarely asked about actions the data do not support (only when the behaviour model itself generalises badly), and the resampled policy can be as multimodal as $\pi^\ast$. SfBC (Chen, Lu, Ying, Su & Zhu, 2023) had already separated a generative behaviour model from an action evaluator in this way.
+
 ---
 
 ## 12. Off-policy evaluation
@@ -1086,7 +1207,7 @@ Before deploying a policy learned offline, or choosing among the dozen policies 
 
 ### 12.2 The importance-sampling family
 
-[Chapter 04](04-monte-carlo.md) derived these estimators for Monte Carlo prediction; here they are side by side:
+[Chapter 04](04-monte-carlo.md) derived ordinary IS, weighted IS and per-decision IS for Monte Carlo prediction; the weighted per-decision estimator WPDIS is new here. Side by side:
 
 $$
 \hat v_{\text{IS}} = \frac{1}{n}\sum_{i=1}^n \rho^{(i)}_{0:H-1}\,G^{(i)}, \qquad
@@ -1101,6 +1222,8 @@ $$
 $$
 
 IS and PDIS are unbiased. PDIS (Precup, Sutton & Singh, 2000) weights each reward only by the ratios of the actions that preceded it, since later actions cannot have caused it. The weighted versions trade a small bias, which vanishes as $n \to \infty$, for a large variance reduction, and WIS never leaves the range of observed returns.
+
+Which weighted per-decision estimator one means matters. WPDIS as written in (16.40) normalises *each time step separately*, by $\sum_i\rho^{(i)}_{0:t}$; Thomas (2015) calls it *consistent* weighted per-decision IS (CWPDIS). Dividing numerator and denominator by $n$, each term is a ratio of two sample means. The numerator tends to $\mathbb{E}_b[\rho_{0:t}R_{t+1}] = \mathbb{E}_\pi[R_{t+1}]$ and the denominator to $\mathbb{E}_b[\rho_{0:t}] = 1$, so by the strong law of large numbers WPDIS converges to $v(\pi)$ with probability 1. [Chapter 04](04-monte-carlo.md) §9.2, following S&B §5.9, warns that weighted per-decision estimators are delicate and that the versions S&B knew of are not consistent. Both statements hold: consistency depends on the normalisation, and (16.40) is a consistent choice. It relies on every denominator having mean 1. Here is a variant that breaks this. Suppose episodes can end early, and terminated episodes are dropped from the step-$t$ sums. The denominator then tends to $\mathbb{E}_b[\rho_{0:t}\mathbb{1}\{T > t\}] = \Pr_\pi\{T > t\}$, and the step-$t$ term converges to $\mathbb{E}_\pi[R_{t+1}\mid T > t]$ instead of $\mathbb{E}_\pi[R_{t+1}\mathbb{1}\{T > t\}]$. Our episodes all have length $H$, so the problem does not arise here.
 
 ```
 Algorithm 16.15: Importance-sampling OPE estimators
@@ -1226,6 +1349,8 @@ As $H$ grows from 2 to 40, the relative RMSE of IS rises from 0.13 to between 1.
 
 **Offline-to-online fine-tuning.** Often a little online interaction *is* possible after offline pre-training. Two things go wrong when switching. Conservative methods stay too conservative and improve slowly. And methods that relax their constraints suddenly can suffer an initial collapse, as the critic meets new state–actions and the replay data shift. Remedies include AWAC (Nair et al., 2020), which uses the same advantage-weighted update offline and online; IQL, which fine-tunes well because it is in-sample; balanced replay of offline and online data with a pessimistic ensemble (Lee, Seo, Lee, Abbeel & Shin, 2021); Cal-QL (Nakamoto et al., 2023), which calibrates CQL's values so that they never fall below a reference policy's value; and RLPD (Ball, Smith, Kostrikov & Levine, 2023), which skips pre-training and simply mixes offline data into an online SAC agent with layer normalisation and large critic ensembles.
 
+**RL fine-tuning of generative policies.** A policy pre-trained by BC (Section 2.8) can be improved with RL once interaction is possible. A diffusion or flow policy, however, has no tractable $\log\pi_{\boldsymbol\theta}(a\mid s)$ to put in a policy gradient: the marginal of the final action over the denoising chain has no closed form. DPPO (Diffusion Policy Policy Optimization; Ren et al., 2025) avoids it by treating the $K$ denoising steps as an *inner MDP*. Its states are $(s, a^k, k)$ and its actions are the next iterates $a^{k-1}$, each drawn from the Gaussian of (16.45), whose log-likelihood is tractable; the environment's reward arrives after the last denoising step. The policy gradient of this inner MDP, which sums the gradients of the per-step Gaussian log-likelihoods, is an unbiased estimate of the gradient of the return (Exercise 16.16). DPPO optimises it with PPO ([Chapter 11](11-trust-regions-and-ppo.md)), treating every denoising step as an action with its own probability ratio and its own clipping, discounting the advantage over the denoising steps so that the early, noisy steps count for less, and keeping the denoising noise above a floor. The same construction fine-tunes text-to-image diffusion models on a reward (DDPO, Black, Janner, Du, Kostrikov & Levine, 2024; DPOK, Fan et al., 2023). Two other recipes leave the BC policy intact. *Residual RL* freezes the base policy, often a chunked diffusion policy executed open loop, and trains a small closed-loop policy by RL to add corrections to its actions (ResiP, Ankile et al., 2024; the idea goes back to Silver, Allen, Tenenbaum & Kaelbling, 2018, and Johannink et al., 2019). *Critics over action chunks* learn $Q(s_t, a_{t:t+H_c-1})$ with $H_c$-step backups, so that TD learning and the policy work in the same chunked action space as the pre-trained policy (Q-chunking; Li, Zhou & Levine, 2025). Diffusion models also serve as world models for planning ([Chapter 13](13-model-based-rl.md) §12).
+
 ---
 
 ## 14. From offline RL to RLHF
@@ -1277,18 +1402,31 @@ pi_loss = -(weight * logp).mean(1).sum()                      # advantage-weight
 
 **Seeds as an ensemble.** On one CPU thread, a small network's training step is dominated by per-call overhead, so five independent sets of weights trained together cost far less than five separate runs. `offline_lib.EnsembleMLP` stores weights of shape `[E, in, out]` and uses `torch.baddbmm`. Each member draws its own minibatches and has its own initialisation, and Adam acts elementwise. Training on the *sum* of the members' losses is therefore exactly $E$ independent runs.
 
+**A diffusion policy's training step** (Eqs. 16.43–16.44) is as short as BC's; all the work is in sampling, which runs the network $K = 20$ times per action:
+
+```python
+# multimodal_bc.py, DDPMPolicy.loss (Algorithm 16.18)
+a0 = a.reshape(len(a), -1)                                  # expert action (or chunk), scaled to [-1, 1]
+k = torch.randint(1, self.K + 1, (len(a0),))
+ab = self.abar[k][:, None]                                  # abar_k
+noise = torch.randn_like(a0)
+a_k = ab.sqrt() * a0 + (1 - ab).sqrt() * noise              # (16.43)
+return (noise - self.eps(a_k, k, s)).pow(2).sum(1).mean()   # (16.44)
+```
+
 **Exact evaluation in tabular demos.** `dagger_vs_bc.py`, `irl_gridworld.py`, `cql_tabular.py` and `ope_tabular.py` compute expected costs, returns and values by propagating distributions or solving linear systems, not by sampling. The only randomness left is in the training data, averaged over hundreds of draws.
 
 | Script | Results in | Quick run | Full run |
 |---|---|---|---|
 | `dagger_vs_bc.py` | Section 2.6 | 2–3 s | 112–141 s |
+| `multimodal_bc.py` | Section 2.8 | 8–10 s | 370–375 s |
 | `irl_gridworld.py` | Section 4.4 | 1 s | 17–23 s |
 | `offline_cartpole.py` | Sections 6.5, 7.3, 8.6, 9.4 | 12–15 s | 300–372 s |
 | `offline_sensitivity.py` | Sections 8.6, 9.4 | 5–7 s | 415 s |
 | `cql_tabular.py` | Section 8.5 | <1 s | 3–4 s |
 | `sequence_vs_dp.py` | Section 11.2 | <1 s | <1 s |
 | `ope_tabular.py` | Section 12.6 | <1 s | 58–61 s |
-| `exercise_solutions.py` | Exercises 16.2, 16.9, 16.10, 16.13, 16.14 | 1 s | 10–11 s |
+| `exercise_solutions.py` | Exercises 16.2, 16.9, 16.10, 16.13–16.16 | 2 s | 16–18 s |
 
 (Wall-clock times on a shared 4-CPU machine, one thread per script; the ranges span runs at different machine loads.)
 
@@ -1297,6 +1435,7 @@ pi_loss = -(weight * logp).mean(1).sum()                      # advantage-weight
 ## Common pitfalls and misconceptions
 
 * **"My BC policy has 99% validation accuracy, so it will work."** Validation states come from the expert's distribution. What matters is the error on the learner's own states (Theorem 16.1 vs Eq. 16.7). Evaluate imitation policies by rolling them out.
+* **Cloning multimodal demonstrations with MSE or a single Gaussian.** The mean of two good actions can be a bad one, and a Gaussian fitted by maximum likelihood is broad enough to sample between the modes (65% and 45% collisions in Section 2.8). Use a policy class that can represent several modes, and check that it does: a mixture can quietly collapse to one broad component, and its training loss barely shows it. On the whole dataset, the two collapsed five-component MDNs of Section 2.8 reached $-8.05$ and $-8.04$, the one that found both modes $-8.16$, and a single Gaussian $-8.03$ to $-8.05$. The demonstrators disagree only near the decision state, where about 5% of the training pairs lie, so the rest of the data dominate the loss. Look at the action distribution in states where demonstrators disagree.
 * **Running an off-policy algorithm on a fixed dataset and calling it offline RL.** DQN, DDPG and SAC rely on new data to correct overestimates. Offline they can diverge spectacularly ($10^5$ instead of 100 in Figure 16.5). Always plot Q estimates against an upper bound such as $R_{\max}/(1-\gamma)$, or against Monte Carlo returns of the data.
 * **Assuming that both actions appearing in the data means coverage is fine.** On the medium dataset the alternative action was logged 10% of the time, and DQN still diverged. What matters is coverage relative to what the *learned* policy will do, in the states it will visit. In-sample methods are not immune either: IQL's upper expectile ($\tau = 0.9$) inflated its values on every dataset, even the expert data with one action per state, and most of all on the narrow medium data (501, against a possible maximum of 100).
 * **Constraining actions but not states.** Support constraints act per state. A policy that deviates a little in every state can still drive into states the data never contain (Section 9.4).
@@ -1314,11 +1453,12 @@ pi_loss = -(weight * logp).mean(1).sum()                      # advantage-weight
 ## Historical notes and key papers
 
 * **Behaviour cloning.** Pomerleau's ALVINN (NIPS 1988, published 1989) learned to steer a vehicle from camera images, at first trained on simulated road images. When Pomerleau later trained it by watching a human drive (*Neural Computation*, 1991), he met covariate shift head-on and addressed it by synthesising shifted views labelled with corrective steering. The name *behavioural cloning* comes from early work on capturing human operators' control skills (Michie, Sammut and colleagues, around 1990). Ross and Bagnell (AISTATS 2010) proved the $\epsilon T^2$ bound and its tightness. Ross, Gordon and Bagnell (AISTATS 2011) introduced DAgger and its reduction to no-regret online learning. Rajaraman, Yang, Jiao and Ramchandran (NeurIPS 2020) gave near-matching upper and lower bounds for tabular imitation without interaction.
+* **Expressive and generalist policies.** Mixture density networks go back to Bishop (1994). Expressive BC took off around 2021–2023: implicit (energy-based) BC (Florence et al., CoRL 2021), Behavior Transformers (Shafiullah et al., NeurIPS 2022), ACT and action chunking (Zhao, Kumar, Levine & Finn, RSS 2023) and Diffusion Policy (Chi et al., RSS 2023). Diffusion Policy built on denoising diffusion models (Sohl-Dickstein et al., ICML 2015; Ho, Jain & Abbeel, NeurIPS 2020); flow-matching policies such as $\pi_0$ later built on flow matching (Lipman et al., ICLR 2023). Generalist policies trained mainly by BC include Gato (Reed et al., TMLR 2022), RT-1 (Brohan et al., RSS 2023), RT-2 (CoRL 2023), the Open X-Embodiment collaboration (ICRA 2024), Octo (RSS 2024), OpenVLA (Kim et al., CoRL 2024) and $\pi_0$ (Black et al., 2024). VPT (Baker et al., NeurIPS 2022) learned from unlabelled video through an inverse dynamics model, and Multi-Game Decision Transformers (Lee et al., NeurIPS 2022) trained one return-conditioned model on 41 Atari games. In offline RL, Diffuser (Janner, Du, Tenenbaum & Levine, ICML 2022) planned by guided sampling, Diffusion-QL (Wang, Hunt & Zhou, ICLR 2023) and SfBC (Chen et al., ICLR 2023) used diffusion policies and behaviour models, and IDQL (Hansen-Estruch et al., 2023) combined them with IQL. DPPO (Ren et al., ICLR 2025) fine-tuned diffusion policies with PPO, following DDPO (Black et al., ICLR 2024) and DPOK (Fan et al., NeurIPS 2023) for image models.
 * **Inverse RL.** Russell (COLT 1998) posed the problem; Ng and Russell (ICML 2000) characterised its solution set and its degeneracy. Ng, Harada and Russell (ICML 1999) proved the shaping theorem. Abbeel and Ng (ICML 2004) introduced apprenticeship learning by feature matching. Ratliff, Bagnell and Zinkevich (ICML 2006) introduced maximum margin planning, and Syed and Schapire (NIPS 2007) the game-theoretic view. Ziebart, Maas, Bagnell and Dey (AAAI 2008) introduced maximum-entropy IRL, and Ziebart, Bagnell and Dey (ICML 2010) the maximum-causal-entropy formulation for stochastic dynamics. Finn, Levine and Abbeel (ICML 2016) scaled it with guided cost learning.
 * **Adversarial imitation.** Ho and Ermon (NIPS 2016) introduced GAIL and the occupancy-measure view. Fu, Luo and Levine (ICLR 2018) introduced AIRL. Kostrikov et al. (ICLR 2019) analysed reward bias in adversarial imitation (Discriminator-Actor-Critic).
 * **Batch and offline RL.** Batch RL predates deep RL: Ernst, Geurts and Wehenkel (JMLR 2005) introduced tree-based fitted Q iteration, and Riedmiller (ECML 2005) neural fitted Q iteration; Lange, Gabel and Riedmiller (2012) surveyed the field. The deep offline RL wave began with BCQ (Fujimoto, Meger & Precup, ICML 2019), which named extrapolation error; discrete BCQ (Fujimoto, Conti, Ghavamzadeh & Pineau, 2019); BEAR (Kumar, Fu, Tucker & Levine, NeurIPS 2019); BRAC (Wu, Tucker & Nachum, 2019); and REM (Agarwal, Schuurmans & Norouzi, ICML 2020). CQL (Kumar, Zhou, Tucker & Levine, NeurIPS 2020), MOPO (Yu et al., NeurIPS 2020) and MOReL (Kidambi et al., NeurIPS 2020) followed. TD3+BC (Fujimoto & Gu, NeurIPS 2021), IQL (Kostrikov, Nair & Levine, ICLR 2022) and SAC-N/EDAC (An et al., NeurIPS 2021) showed how far simple ideas go. Advantage-weighted policy updates go back to reward-weighted regression (Peters & Schaal, ICML 2007), followed by AWR (Peng et al., 2019), AWAC (Nair et al., 2020) and CRR (Wang et al., NeurIPS 2020). The theory of pessimism was developed by Jin, Yang and Wang (ICML 2021) and Rashidinejad et al. (NeurIPS 2021). Levine, Kumar, Tucker and Fu's tutorial (2020) and the D4RL benchmark (Fu et al., 2020) shaped the field.
 * **Sequence modelling.** Upside-down RL (Schmidhuber, 2019; Srivastava et al., 2019) and reward-conditioned policies (Kumar, Peng & Levine, 2019) preceded Decision Transformer (Chen et al., NeurIPS 2021) and Trajectory Transformer (Janner, Li & Levine, NeurIPS 2021). RvS (Emmons, Eysenbach, Kostrikov & Levine, ICLR 2022) showed that simple conditioned MLP policies match them on many benchmarks. Brandfonbrener et al. (NeurIPS 2022) and Paster, McIlraith and Ba (NeurIPS 2022) analysed the limits.
-* **Off-policy evaluation.** Precup, Sutton and Singh (ICML 2000) introduced per-decision importance sampling. Dudík, Langford and Li (ICML 2011) brought doubly robust estimation to contextual bandits, and Jiang and Li (ICML 2016) to sequential decisions. Thomas and Brunskill (ICML 2016) introduced weighted DR and MAGIC. Le, Voloshin and Yue (ICML 2019) introduced fitted Q evaluation. Liu, Li, Tang and Zhou (NeurIPS 2018) and Nachum, Chow, Dai and Li (NeurIPS 2019, DualDICE) estimated state–action distribution ratios to break the curse of horizon. Wang, Foster and Kakade (ICLR 2021) showed that with linear function approximation even a realizable, well-covered evaluation problem can need a number of samples exponential in the horizon.
+* **Off-policy evaluation.** Precup, Sutton and Singh (ICML 2000) introduced per-decision importance sampling. Dudík, Langford and Li (ICML 2011) brought doubly robust estimation to contextual bandits, and Jiang and Li (ICML 2016) to sequential decisions. Thomas's PhD thesis (*Safe Reinforcement Learning*, University of Massachusetts Amherst, 2015) introduced the per-time-step normalised, consistent form of weighted per-decision IS used in (16.40), and Thomas and Brunskill (ICML 2016) introduced weighted DR and MAGIC. Le, Voloshin and Yue (ICML 2019) introduced fitted Q evaluation. Liu, Li, Tang and Zhou (NeurIPS 2018) and Nachum, Chow, Dai and Li (NeurIPS 2019, DualDICE) estimated state–action distribution ratios to break the curse of horizon. Wang, Foster and Kakade (ICLR 2021) showed that with linear function approximation even a realizable, well-covered evaluation problem can need a number of samples exponential in the horizon.
 
 ---
 
@@ -1326,12 +1466,13 @@ pi_loss = -(weight * logp).mean(1).sum()                      # advantage-weight
 
 * **Imitation is supervised learning on the wrong distribution.** BC minimises error on the expert's states, but errors compound on the learner's own states: the excess cost can grow as $\epsilon T^2$, and that bound is tight.
 * **DAgger** trains on the learner's own states, labelled by a queryable expert, and turns the bound into $uT\epsilon$ for recoverable tasks. In our tightrope it needed about ten times fewer labels than BC.
+* **Multimodal demonstrations need an expressive policy class.** MSE-BC and a maximum-likelihood Gaussian average the modes (65% and 45% collisions in our obstacle task); a mixture can collapse to one broad component (30% collisions after 4,000 gradient steps, none after 16,000); binned actions and a diffusion policy kept both modes (0.5% and 1.7% collisions), the diffusion policy only with the longer training. Diffusion policies are trained by predicting the noise added to expert actions and act by iterative denoising; action chunks commit to a mode and cut the number of decisions. The generalist robot policies (RT-2, Octo, OpenVLA, $\pi_0$) are trained mainly this way, by BC at scale.
 * **IRL** recovers a reward that explains behaviour. It is ill-posed (constants, scaling, shaping, degenerate solutions), so every method adds a selection principle: margins, feature matching, or maximum entropy. A recovered reward can **transfer** to changed dynamics, where cloned policies fail.
 * **MaxEnt IRL** is maximum likelihood in an exponential family. Its gradient is expert feature counts minus model feature counts, computed with soft value iteration. **GAIL** minimises the Jensen–Shannon divergence between occupancy measures; **AIRL** structures the discriminator to return a disentangled reward.
 * **Offline RL fails naively because of extrapolation error.** The Bellman max queries actions the data never contain, and nothing corrects the resulting overestimates. Coverage, not quantity, decides whether naive Q-learning works.
 * **Pessimism is the cure, in several guises:** constrain the policy to the data (BCQ, BEAR, BRAC, TD3+BC), learn a value that lower-bounds the truth (CQL, with a $\chi^2$-shaped gap), stay in-sample (IQL's expectiles plus advantage-weighted regression), penalise uncertainty (ensembles), or penalise model rollouts (MOPO, MOReL).
 * **Every method needs a conservatism knob,** and its safe range depends on the dataset. Choosing it offline is itself an OPE problem.
-* **Return-conditioned sequence models** turn RL into supervised learning but cannot stitch sub-trajectories and confuse luck with skill in stochastic environments.
+* **Return-conditioned sequence models** turn RL into supervised learning but cannot stitch sub-trajectories and confuse luck with skill in stochastic environments. Diffusion models serve offline RL as trajectory planners (Diffuser) and as expressive behaviour models whose samples a critic reweights (IDQL), and can be fine-tuned by policy gradients through their denoising chains (DPPO).
 * **OPE estimators trade bias for variance:** IS is unbiased but its variance grows exponentially in the horizon; weighting and per-decision ratios help; FQE is low-variance but biased under misspecification; DR is unbiased with any model and benefits from a good one.
 * **RLHF** (Chapter 18) is these ideas at scale: SFT is BC, reward modelling is IRL from preferences, the KL penalty is a behaviour constraint with an AWR-shaped solution, and reward over-optimisation is extrapolation error.
 
@@ -1344,6 +1485,8 @@ pi_loss = -(weight * logp).mean(1).sum()                      # advantage-weight
 | Cliff example | $J(\hat\pi) - J(\pi^\ast) = T - \frac{1 - (1-\epsilon)^T}{\epsilon} \approx \epsilon\frac{T(T-1)}{2}$ (16.5) |
 | Performance difference (costs) | $J(\pi) - J(\pi^\ast) = \sum_t\mathbb{E}_{d^\pi_t}\big[Q^\ast_t(S_t,A_t) - V^\ast_t(S_t)\big]$ (16.6) |
 | DAgger-type bound | $J(\pi) \le J(\pi^\ast) + uT\epsilon_{\text{own}}(\pi)$ (16.7) |
+| Diffusion policy: noising, loss, sampling | $a^k = \sqrt{\bar\alpha_k}a^0 + \sqrt{1-\bar\alpha_k}\boldsymbol\epsilon$; $\ \min_{\boldsymbol\theta}\mathbb E\lVert\boldsymbol\epsilon - \boldsymbol\epsilon_{\boldsymbol\theta}(a^k,k,s)\rVert^2$; $\ a^{k-1} = \frac{1}{\sqrt{\alpha_k}}\big(a^k - \frac{\beta_k}{\sqrt{1-\bar\alpha_k}}\boldsymbol\epsilon_{\boldsymbol\theta}\big) + \sigma_k\mathbf z$ (16.43–16.45) |
+| Flow-matching policy | $\min_{\boldsymbol\theta}\mathbb E\lVert\mathbf v_{\boldsymbol\theta}(u a + (1-u)\mathbf z, u, s) - (a - \mathbf z)\rVert^2$ (16.46) |
 | Feature matching | $\lvert v_{\boldsymbol\omega}(\pi) - v_{\boldsymbol\omega}(\pi_E)\rvert \le \lVert\boldsymbol\mu(\pi) - \boldsymbol\mu_E\rVert_2$ for $\lVert\boldsymbol\omega\rVert_2\le1$ (16.10) |
 | MaxEnt model / gradient | $P_{\boldsymbol\omega}(\zeta)\propto e^{\boldsymbol\omega^\top\boldsymbol\phi(\zeta)}$; $\nabla L = \hat{\boldsymbol\mu}_E - \boldsymbol\mu(\pi_{\boldsymbol\omega})$ (16.11, 16.16) |
 | Soft value iteration | $Q_t = r + \mathbf{P}V_{t+1}$, $V_t = \log\sum_a e^{Q_t}$, $\pi_t = e^{Q_t - V_t}$ (16.14–16.15) |
@@ -1374,7 +1517,7 @@ pi_loss = -(weight * logp).mean(1).sum()                      # advantage-weight
 
 (b) $\log\mathcal{N}(a; \mu_{\boldsymbol\theta}(s), \sigma^2) = -\frac{(a - \mu_{\boldsymbol\theta}(s))^2}{2\sigma^2} - \frac12\log(2\pi\sigma^2)$. Maximising its average is minimising $\frac1N\sum_i(a_i - \mu_{\boldsymbol\theta}(s_i))^2$.
 
-(c) MSE is minimised by the conditional mean, so the policy steers straight ahead, between the two modes, into the obstacle. Forward KL is mode-covering: a unimodal model must spread over both modes. Mixture-density (e.g. Gaussian mixture) policies, discretised actions with a categorical output, energy-based (implicit) policies and diffusion policies can all represent both modes.
+(c) MSE is minimised by the conditional mean, so the policy steers straight ahead, between the two modes, into the obstacle. Forward KL is mode-covering: a unimodal model must spread over both modes. Mixture-density (e.g. Gaussian mixture) policies, discretised actions with a categorical output, energy-based (implicit) policies and diffusion policies can all represent both modes. Section 2.8 compares them on exactly this problem, and Exercise 16.15 computes how often the Gaussian collides.
 
 </details>
 
@@ -1408,7 +1551,7 @@ pi_loss = -(weight * logp).mean(1).sum()                      # advantage-weight
 
 (a) Every policy has value $c/(1-\gamma)$ in every state, so all are optimal.
 
-(b) The shaped return from $(s,a)$ is $\sum_t\gamma^t(R_{t+1} + \gamma\Phi(S_{t+1}) - \Phi(S_t))$ with $S_0 = s$. The shaping terms telescope: $\sum_{t=0}^{K-1}(\gamma^{t+1}\Phi(S_{t+1}) - \gamma^t\Phi(S_t)) = \gamma^K\Phi(S_K) - \Phi(S_0) \to -\Phi(s)$ for bounded $\Phi$ and $\gamma < 1$. Taking expectations, $q'_\pi(s,a) = q_\pi(s,a) - \Phi(s)$. The shift does not depend on $a$, so the greedy actions, and hence the optimal policies, are the same.
+(b) The shaped return from $(s,a)$ is $\sum_t\gamma^t(R_{t+1} + \gamma\Phi(S_{t+1}) - \Phi(S_t))$ with $S_0 = s$. The shaping terms telescope: $\sum_{t=0}^{K-1}(\gamma^{t+1}\Phi(S_{t+1}) - \gamma^t\Phi(S_t)) = \gamma^K\Phi(S_K) - \Phi(S_0) \to -\Phi(s)$ for bounded $\Phi$ and $\gamma < 1$. (In an episodic task the sum stops at the terminal time $T$ and leaves $\gamma^{T}\Phi(S_T) - \Phi(s)$, which is why $\Phi$ must be 0 at terminal states; see Section 3.2 and Chapter 20 §2.3.) Taking expectations, $q'_\pi(s,a) = q_\pi(s,a) - \Phi(s)$. The shift does not depend on $a$, so the greedy actions, and hence the optimal policies, are the same.
 
 (c) The features are one-hot and every state has exactly one terrain, so $\sum_j\phi_j(s) = 1$ and every $H$-step trajectory has total feature count summing to $H$. Adding $c$ to every weight adds $cH$ to the return of every trajectory, which changes no policy's ranking and no soft-optimal policy (all soft Q-values at time $t$ shift by $c(H-t)$, independently of the action). Accordingly the MaxEnt gradient $\hat{\boldsymbol\mu}_E - \boldsymbol\mu(\pi_{\boldsymbol\omega})$ always has components summing to $H - H = 0$, and the sum of the weights never moves from its initial value.
 
@@ -1514,7 +1657,7 @@ The stochastic gridworld of Section 4.4 fails in a different way. There $\hat{\b
 
 (b) With `lr_d = 0.2`: mean 0.48, range 0.41–0.62. At the goal $D$ is 0.50–0.51, slightly above $\tfrac12$ as it should be. The demonstrations spent 16.80 steps at the goal, more than any policy can achieve (16.67; Section 4.4), and the GAIL policy, slowed a little by its entropy bonus, spends 16.38. Elsewhere, too, the policy cannot reproduce an occupancy that lies outside the achievable set, and the entropy bonus trades some matching for entropy, so $D$ stays near $\tfrac12$ without equalling it.
 
-With `lr_d = 1`, $D$ ranges from 0.011 to 0.912, and both extremes sit at the goal; elsewhere on the support it stays within 0.41–0.62. The cause is the step size, not the data. Per pair, the gradient of the discriminator objective with respect to the logit $\psi$ of $D = \sigma(\psi)$ is $\rho_E(1 - D) - \rho_\pi D$, with $\rho$ the normalised occupancies and fixed point $D^\ast = \rho_E/(\rho_E + \rho_\pi)$, which is (16.19). Linearised, one step of size $\eta$ multiplies the error in $\psi$ by $1 - \eta(\rho_E + \rho_\pi)D^\ast(1 - D^\ast)$, so the step is stable only if $\eta(\rho_E + \rho_\pi)D^\ast(1 - D^\ast) < 2$. The script uses $\eta = 63\,$`lr_d` (the step is scaled by $|\mathcal{S}| = 63$). The absorbing goal holds more than half of all time steps, so its five pairs have by far the largest occupancies. The script reports the bound $\eta(\rho_E + \rho_\pi)/4$ (tight when $D^\ast \approx \tfrac12$): with `lr_d = 1` it is 5.89 at the goal, unstable, and at most 1.18 elsewhere. $D$ at the goal then flips from one iteration to the next. For the action "south" it is 0.937, 0.032 and 0.912 at iterations 2,997, 2,998 and 2,999. With `lr_d = 0.2` the bound is 0.82 at the goal, and $D$ settles. This is a tabular miniature of a familiar GAN failure: a discriminator updated too aggressively oscillates instead of tracking its best response.
+With `lr_d = 1`, $D$ ranges from 0.011 to 0.912, and both extremes sit at the goal; elsewhere on the support it stays within 0.41–0.62. The cause is the step size, not the data. Per pair, the gradient of the discriminator objective with respect to the logit $z$ of $D = \sigma(z)$ is $d^{\pi_E}(1 - D) - d^\pi D$, with $d^{\pi_E}, d^\pi$ the normalised (here undiscounted, finite-horizon) occupancies and fixed point $D^\ast = d^{\pi_E}/(d^{\pi_E} + d^\pi)$, which is (16.19). Linearised, one step of size $\eta$ multiplies the error in $z$ by $1 - \eta(d^{\pi_E} + d^\pi)D^\ast(1 - D^\ast)$, so the step is stable only if $\eta(d^{\pi_E} + d^\pi)D^\ast(1 - D^\ast) < 2$. The script uses $\eta = 63\,$`lr_d` (the step is scaled by $|\mathcal{S}| = 63$). The absorbing goal holds more than half of all time steps, so its five pairs have by far the largest occupancies. The script reports the bound $\eta(d^{\pi_E} + d^\pi)/4$ (tight when $D^\ast \approx \tfrac12$): with `lr_d = 1` it is 5.89 at the goal, unstable, and at most 1.18 elsewhere. $D$ at the goal then flips from one iteration to the next. For the action "south" it is 0.937, 0.032 and 0.912 at iterations 2,997, 2,998 and 2,999. With `lr_d = 0.2` the bound is 0.82 at the goal, and $D$ settles. This is a tabular miniature of a familiar GAN failure: a discriminator updated too aggressively oscillates instead of tracking its best response.
 
 (c) With the stable discriminator, the GAIL policy replayed in the transfer world scores 17.4. That beats BC's −42.2 but is far below MaxEnt IRL's 55.9. Re-optimising the discriminator reward $-\log(1 - D)$ there gives 50.0, against the optimum 56.7. The re-planned policy reaches the goal as fast as the optimal one (18.89 expected goal visits). But instead of following the new bottom road all the way, it cuts up through the mud cell (5,5) onto the old road, with 1.11 expected mud visits at −6 each. The script lists the cells it uses. The mud cell's reward (0.646) is no lower than that of the bottom-road cells (0.638–0.646), because no demonstration ever entered it, and the goal's (0.721) is only slightly higher.
 
@@ -1542,6 +1685,34 @@ WIS never chooses the best policy. That policy is deterministic and almost no 10
 
 </details>
 
+**Exercise 16.15 ★★ (mode averaging, by hand).** In one state an expert's lateral action is $a = +m + \xi$ or $a = -m + \xi$, each with probability $\tfrac12$, where $\xi\sim\mathcal N(0, s^2)$. Any action with $\lvert a\rvert < c$ hits an obstacle. (a) What does MSE-BC do, and how often does it collide? (b) Show that the maximum-likelihood Gaussian policy is $\mathcal N(0, m^2 + s^2)$, and find its collision probability when actions are sampled from it. (c) What is the expert's collision probability, and that of a two-component Gaussian mixture fitted exactly? (d) Evaluate (a)–(c) for $m = 0.1$, $s = 0.01$, $c = 0.05$, an idealisation of the decision state in Section 2.8's experiment, and compare with the experiment.
+
+<details><summary>Solution</summary>
+
+(a) MSE is minimised by the conditional mean, $\mathbb E[a] = \tfrac12 m - \tfrac12 m + \mathbb E[\xi] = 0$. The cloned policy plays $a = 0$, and since $\lvert 0\rvert < c$ it collides with probability 1, whatever $m$, $s$ and $c > 0$.
+
+(b) For a Gaussian $\mathcal N(\mu,\sigma^2)$, maximising the expected log-likelihood is minimising the forward KL divergence, which is solved by moment matching ([Chapter 00](00-math-toolkit.md), Eq. 5.9): $\mu = \mathbb E[a] = 0$ and $\sigma^2 = \mathrm{Var}(a)$. By the law of total variance, $\mathrm{Var}(a)$ is the variance of the mode, $m^2$, plus the variance of the noise, $s^2$. So $\Pr\{\lvert a\rvert < c\} = 2\Phi\big(c/\sqrt{m^2+s^2}\big) - 1$, with $\Phi$ the standard normal distribution function.
+
+(c) For either mode, $\Pr\{\lvert \pm m + \xi\rvert < c\} = \Phi\big((c-m)/s\big) - \Phi\big((-c-m)/s\big)$, so that is the expert's collision probability. The mixture $\tfrac12\mathcal N(m, s^2) + \tfrac12\mathcal N(-m, s^2)$ *is* the expert's action distribution, so it collides equally rarely.
+
+(d) `exercise_solutions.py` prints: MSE-BC 1; the Gaussian, with standard deviation 0.1005, $2\Phi(0.4975) - 1 = 0.381$ (Monte Carlo 0.381); the expert $\Phi(-5) - \Phi(-15) = 2.9\times10^{-7}$. In the experiment the Gaussian put 37% of its samples at the decision state within 0.05 of zero, close to 38%. It collided in 45% of rollouts rather than 38% because the sharp threshold $c$ is an idealisation: whether an agent clears the obstacle also depends on its later actions. MSE-BC collided in 65% rather than 100% for the same reason, in its favour: noise and the fitted mean between the branches let some agents escape. The mixture's "equally rarely" assumes it is fitted exactly; Section 2.8's two-component MDN never was.
+
+</details>
+
+**Exercise 16.16 ★★ (the denoising chain as an MDP).** A diffusion policy samples $a^K\sim\mathcal N(\mathbf 0,\mathbf I)$, then $a^{k-1}\sim p_{\boldsymbol\theta}(\cdot\mid a^k, s) = \mathcal N\big(\boldsymbol\mu_{\boldsymbol\theta}(a^k,k,s),\ \sigma_k^2\mathbf I\big)$ for $k = K, \dots, 1$, where $\boldsymbol\mu_{\boldsymbol\theta}$ is the deterministic part of (16.45), and executes $a^0$. Assume $\sigma_k > 0$ for every $k$, including $k = 1$. (With $\sigma_1 = 0$, as in (16.45), the last step is deterministic and has no density.) Take a one-step problem with reward $r(s, a^0)$ and objective $J(\boldsymbol\theta) = \mathbb E_s\,\mathbb E\big[r(s, a^0)\big]$. (a) Write the log-likelihood of a sampled chain $a^{K:0}$ and its gradient. (b) Show that $\nabla_{\boldsymbol\theta}J = \mathbb E\big[r(s,a^0)\sum_{k=1}^{K}\nabla_{\boldsymbol\theta}\log p_{\boldsymbol\theta}(a^{k-1}\mid a^k, s)\big]$, and that a baseline $b(s)$ may be subtracted from $r$. (c) Why not use $\nabla_{\boldsymbol\theta}\log\pi_{\boldsymbol\theta}(a^0\mid s)$, as REINFORCE would? (d) How does this become DPPO's inner MDP in a sequential task, and what happens to the per-step probability ratios as $\sigma_k \to 0$?
+
+<details><summary>Solution</summary>
+
+(a) $\log p_{\boldsymbol\theta}(a^{K:0}\mid s) = \log\mathcal N(a^K;\mathbf 0,\mathbf I) - \sum_{k=1}^{K}\frac{\lVert a^{k-1} - \boldsymbol\mu_{\boldsymbol\theta}(a^k,k,s)\rVert^2}{2\sigma_k^2} + \text{const}$, where neither the first term nor the constant depends on $\boldsymbol\theta$. Its gradient is $\sum_{k}\sigma_k^{-2}\big(\partial\boldsymbol\mu_{\boldsymbol\theta}(a^k,k,s)/\partial\boldsymbol\theta\big)^{\top}\big(a^{k-1} - \boldsymbol\mu_{\boldsymbol\theta}(a^k,k,s)\big)$, which backpropagation computes for a sampled chain, holding the sampled iterates fixed.
+
+(b) The chain's density factorises, $p_{\boldsymbol\theta}(a^{K:0}\mid s) = \mathcal N(a^K;\mathbf 0,\mathbf I)\prod_{k}p_{\boldsymbol\theta}(a^{k-1}\mid a^k, s)$, and the reward depends on the chain only through $a^0$, whose marginal is $\pi_{\boldsymbol\theta}(\cdot\mid s)$. So $J = \mathbb E_s\int p_{\boldsymbol\theta}(a^{K:0}\mid s)\,r(s,a^0)\,da^{K:0}$, and the log-derivative trick of [Chapter 10](10-policy-gradients.md), applied to the joint density, gives $\nabla J = \mathbb E\big[r\,\nabla\log p_{\boldsymbol\theta}(a^{K:0}\mid s)\big]$, which is the claimed sum because the first factor does not depend on $\boldsymbol\theta$. A baseline adds $\mathbb E\big[b(s)\nabla\log p_{\boldsymbol\theta}(a^{K:0}\mid s)\big] = \mathbb E_s\big[b(s)\nabla\!\int p_{\boldsymbol\theta}(a^{K:0}\mid s)\,da^{K:0}\big] = \mathbb E_s[b(s)\nabla 1] = 0$. `exercise_solutions.py` checks this on a two-step linear-Gaussian chain whose $\nabla J$ is known in closed form: exact $(3.8, 1.9)$, estimated from 2,000,000 chains with a constant baseline $(3.790, 1.899)$, with standard errors $(0.005, 0.003)$.
+
+(c) $\pi_{\boldsymbol\theta}(a^0\mid s) = \int p_{\boldsymbol\theta}(a^{K:0}\mid s)\,da^{K:1}$ integrates over every chain that ends at $a^0$. It has no closed form, so neither it nor its gradient can be evaluated. The joint log-likelihood can, and (b) shows that it suffices. The price is variance: every denoising step is credited with the same reward, as every action of an episode is in REINFORCE.
+
+(d) In a sequential task each environment step $t$ contains a chain. Take the states of an augmented MDP to be $(s_t, a_t^k, k)$, its actions the iterates $a_t^{k-1}$, its rewards 0 except after the last denoising step, where the environment pays $r(s_t, a_t^0)$ and moves to $s_{t+1}$. Policy-gradient theory applies unchanged; without discounting inside a chain, every denoising step of environment step $t$ shares that step's advantage. The likelihood ratio of a whole chain is the product of the $K$ per-step ratios $p_{\boldsymbol\theta}(a^{k-1}\mid a^k,s)/p_{\boldsymbol\theta_{\text{old}}}(a^{k-1}\mid a^k,s)$. DPPO does not clip that product: it treats each denoising step as an action of the inner MDP and clips each per-step ratio, as PPO clips the ratio of each environment action. As $\sigma_k\to 0$ each Gaussian becomes very narrow: a small change in $\boldsymbol\mu_{\boldsymbol\theta}$ changes $\lVert a^{k-1} - \boldsymbol\mu_{\boldsymbol\theta}\rVert^2/(2\sigma_k^2)$ a lot, so the ratios swing wildly, and the score $\sigma_k^{-2}(\partial\boldsymbol\mu_{\boldsymbol\theta}/\partial\boldsymbol\theta)^\top(a^{k-1} - \boldsymbol\mu_{\boldsymbol\theta})$, whose second factor has size $\sigma_k$, grows like $1/\sigma_k$, and with it the gradient's variance. Clipping limits the damage, and practical fine-tuning keeps the denoising noise above a floor (in DPPO's code the default minimum standard deviation is 0.1, on normalised actions).
+
+</details>
+
 ---
 
 ## Further reading
@@ -1551,6 +1722,7 @@ WIS never chooses the best policy. That policy is deterministic and almost no 10
 * **Osa, Pajarinen, Neumann, Bagnell, Abbeel & Peters (2018), *An Algorithmic Perspective on Imitation Learning* (Foundations and Trends in Robotics).** A broad survey of BC, IRL and their use in robotics.
 * **Ziebart (2010), PhD thesis, *Modeling Purposeful Adaptive Behavior with the Principle of Maximum Causal Entropy* (Carnegie Mellon).** The full maximum-entropy and maximum-causal-entropy story, with derivations.
 * **Ho & Ermon (2016), *Generative Adversarial Imitation Learning*.** Short and illuminating: the occupancy-measure view of IRL followed by RL, and how GAIL drops out of it.
+* **Chi, Feng, Du, Xu, Cousineau, Burchfiel & Song (2023), *Diffusion Policy: Visuomotor Policy Learning via Action Diffusion*.** Why diffusion suits multimodal demonstrations and action chunks, with careful ablations on simulated and real robots; read alongside Section 2.8.
 * **Kumar, Zhou, Tucker & Levine (2020), *Conservative Q-Learning for Offline Reinforcement Learning*.** Read Section 3 alongside our Section 8; the theorems are the ones we verified numerically.
 * **Kostrikov, Nair & Levine (2022), *Offline Reinforcement Learning with Implicit Q-Learning*.** Expectiles, in-sample learning and AWR extraction in a few pages.
 * **Fujimoto & Gu (2021), *A Minimalist Approach to Offline Reinforcement Learning*.** TD3+BC, and a useful discussion of which implementation details matter.

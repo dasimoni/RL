@@ -3,7 +3,7 @@
 The one continuous-state problem that DP solves exactly is the linear-quadratic regulator:
     S_{t+1} = F S_t + G A_t + W_t,      R_{t+1} = -(S_t' C_s S_t + A_t' C_a A_t),
 with W_t zero-mean noise of covariance Sigma_w. Backward induction (Algorithm 3.6) with the guess
-V_t(s) = -s' P_t s - c_t gives the discounted Riccati recursion (3.29)-(3.30). This script checks:
+V_t(s) = -s' P_t s - c_t gives the discounted Riccati recursion (3.30)-(3.31). This script checks:
 
   A. the finite-horizon Riccati recursion against Monte Carlo, certainty equivalence (the gains do
      not depend on Sigma_w), convergence of P_t to the discounted DARE, and the scipy scaling trick
@@ -47,7 +47,7 @@ def greedy_gain(P, F, G, Ca, gamma):
 
 
 def riccati_step(P, F, G, Cs, Ca, gamma):
-    """One backward-induction step P_{t+1} -> P_t (eq. 3.29), i.e. one value-iteration sweep."""
+    """One backward-induction step P_{t+1} -> P_t (eq. 3.31), i.e. one value-iteration sweep."""
     K = greedy_gain(P, F, G, Ca, gamma)
     Pn = Cs + gamma * F.T @ P @ F - gamma * F.T @ P @ G @ K
     return 0.5 * (Pn + Pn.T), K
@@ -166,15 +166,17 @@ def grid_value_iteration(F, G, Cs, Ca, gamma, L, ell, n_act, A_max, tol=1e-9):
 # ----------------------------------------------------------------------------------------------
 # Part E: iLQR for reward maximisation (Algorithm 3.7).
 # ----------------------------------------------------------------------------------------------
-def ilqr(f, derivs, terminal, s0, U0, gamma=1.0, lo=None, hi=None, max_iter=300, tol=1e-6, mu0=1.0):
+def ilqr(f, derivs, terminal, s0, U0, gamma=1.0, lo=None, hi=None, max_iter=300, tol=1e-6, mu0=1.0, stats=None):
     """Iterative LQR with Levenberg-Marquardt-style regularisation and a backtracking line search.
 
     f(s, a) -> next state; derivs(s, a) -> (r, r_s, r_a, r_ss, r_aa, r_as, f_s, f_a);
-    terminal(s) -> (h, h_s, h_ss). Hessians of r must be negative semi-definite (we maximise).
+    terminal(s) -> (h, h_s, h_ss). We maximise, so Q_aa must be negative definite; where it is not
+    (e.g. a reward Hessian with positive curvature), the regulariser mu is increased until it is.
     Action bounds [lo, hi] are handled by clamping k_t and zeroing the clamped rows of K_t (exact for a
     scalar action; Tassa, Mansard & Todorov, 2014, solve a small box QP in general).
     Policy at iteration end: a_t = abar_t + alpha k_t - K_t (s_t - sbar_t).
-    Returns S, U, k, K, J, history of J, number of iterations.
+    Returns S, U, k, K, J, history of J, number of iterations. If a dict `stats` is passed, stats['indefinite']
+    counts the backward passes that were restarted because the regularised Q_aa was not negative definite.
     """
     def clip(u):
         return u if lo is None else np.clip(u, lo, hi)
@@ -215,6 +217,8 @@ def ilqr(f, derivs, terminal, s0, U0, gamma=1.0, lo=None, hi=None, max_iter=300,
                     np.linalg.cholesky(-Qaa_r)
                 except np.linalg.LinAlgError:
                     ok = False
+                    if stats is not None:
+                        stats["indefinite"] = stats.get("indefinite", 0) + 1
                     break
                 kt = -np.linalg.solve(Qaa_r, Qa)
                 Kt = np.linalg.solve(Qaa_r, Qas_r)        # delta a = k - K delta s
@@ -285,6 +289,18 @@ def pend_terminal(s):
             np.diag([-2 * np.cos(th / 2) ** 2, -0.2]))
 
 
+def pend_derivs_exact(s, a):
+    """As pend_derivs, but with the exact curvature -2 cos(theta) of the reward (positive near the bottom)."""
+    out = list(pend_derivs(s, a))
+    out[3] = np.diag([-2 * np.cos(s[0]), -0.2])
+    return tuple(out)
+
+
+def pend_terminal_exact(s):
+    h, hs, _ = pend_terminal(s)
+    return h, hs, np.diag([-2 * np.cos(s[0]), -0.2])
+
+
 def lq_problem(F, G, Cs, Ca):
     """Derivative oracle for a linear-quadratic problem (used to check iLQR against Riccati)."""
     def f(s, a):
@@ -349,9 +365,10 @@ def main():
     print(f"||P_t - P_DARE||/||P_DARE|| with 1, 10, 50 steps to go: {rel[H - 1]:.2e}, {rel[H - 10]:.2e}, {rel[0]:.2e};"
           f" below 1e-10 after {steps} steps.  Asymptotic rate gamma*rho(F-GK)^2 = {gamma * rho_cl ** 2:.3f}")
     P_wrong = solve_discrete_are(F, G, Cs, Ca)
-    print(f"scipy solve_discrete_are(sqrt(g)F, sqrt(g)G, C_s, C_a) vs the limit of the recursion: "
-          f"{np.max(np.abs(P_dare - Pv)):.1e}.  Without the sqrt(g) scaling (undiscounted P): "
-          f"relative difference {np.linalg.norm(P_wrong - P_dare) / np.linalg.norm(P_dare):.2f}")
+    print(f"scipy solve_discrete_are(sqrt(g)F, sqrt(g)G, C_s, C_a) vs P_0 of the {H}-step recursion: "
+          f"max entry difference {np.max(np.abs(P_dare - P[0])):.1e} (relative {rel[0]:.1e}).  "
+          f"Without the sqrt(g) scaling (undiscounted P): relative difference "
+          f"{100 * np.linalg.norm(P_wrong - P_dare) / np.linalg.norm(P_dare):.1f}%")
     c_stat = gamma * np.trace(P_dare @ Sigma_w) / (1 - gamma)
     print(f"stationary noise constant c = gamma tr(P Sigma_w)/(1-gamma) = {c_stat:.4f}; c_0 for H={H}: {c[0]:.4f}")
 
@@ -392,6 +409,9 @@ def main():
     print("scalar, K_0 = 0:  Hewer P_k = " + ", ".join(f"{x:.6f}" for x in hew))
     print("                  Newton P_k = " + ", ".join(f"{x:.6f}" for x in newt)
           + f"   (max difference {np.max(np.abs(np.array(hew) - np.array(newt))):.1e})")
+    e_h = np.array(hew) - P_s
+    print("                  errors P_k - P = " + ", ".join(f"{x:.2e}" for x in e_h)
+          + ";  e_{k+1}/e_k^2 = " + ", ".join(f"{e_h[i + 1] / e_h[i] ** 2:.4f}" for i in range(len(e_h) - 1)))
     gamma_c, rho_F = 0.95, 1.02
     dims = [2, 8] if quick else [2, 4, 8, 16, 32, 64]
     print(f"random systems: rho(F) = {rho_F} (unstable), d_a = d_s/2, C_s = I, C_a = I, gamma = {gamma_c}; "
@@ -461,8 +481,7 @@ def main():
     # (i) exactness on an LQ problem: one iteration from a zero nominal reproduces the Riccati gains.
     fl, dl, tl = lq_problem(F, G, Cs, Ca)
     Hl = 30
-    _, _, Kl = finite_horizon_lqr(F, G, Cs, Ca, 1.0, Hl, np.zeros((d, d)))
-    Pl, _, _ = finite_horizon_lqr(F, G, Cs, Ca, 1.0, Hl, np.zeros((d, d)))
+    Pl, _, Kl = finite_horizon_lqr(F, G, Cs, Ca, 1.0, Hl, np.zeros((d, d)))
     S_l, U_l, k_l, K_l, J_l, hist_l, it_l = ilqr(fl, dl, tl, s0, np.zeros((Hl, m)), gamma=1.0, tol=1e-12, mu0=0.0)
     print(f"LQ problem of Part A (gamma = 1, H = {Hl}): iLQR stops after {it_l} iterations; "
           f"return after iteration 1 = {hist_l[1]:.6f}, -s0'P_0 s0 = {-s0 @ Pl[0] @ s0:.6f}; "
@@ -472,20 +491,39 @@ def main():
     Hp = 100
     U_init = 0.1 * np.random.default_rng(SEED).normal(size=(Hp, 1))
     t0 = time.perf_counter()
+    st_gn = {"indefinite": 0}
     S_p, U_p, k_p, K_p, J_p, hist_p, it_p = ilqr(pend_f, pend_derivs, pend_terminal, s_down, U_init,
-                                                 lo=-AMAX, hi=AMAX, max_iter=40 if quick else 300)
+                                                 lo=-AMAX, hi=AMAX, max_iter=40 if quick else 300, stats=st_gn)
     t_p = time.perf_counter() - t0
     up = np.where(np.cos(S_p[:, 0]) > np.cos(0.1))[0]
     t_up = up[0] if len(up) else None
+    stays = t_up is not None and bool(np.all(np.cos(S_p[t_up:, 0]) > np.cos(0.1)))
     sat = np.mean(np.abs(U_p[:, 0]) >= AMAX - 1e-9)
+    # turning points (omega changes sign) before the final ascent, as signed angles from the bottom
+    above = np.where(np.abs(S_p[:, 0] - np.pi) > np.pi / 2)[0]
+    t_end = above[0] if len(above) else Hp
+    turns = [np.degrees(S_p[i + 1, 0] - np.pi) for i in range(t_end - 1)
+             if np.sign(S_p[i, 1]) * np.sign(S_p[i + 1, 1]) < 0]
     print(f"pendulum swing-up, H = {Hp} steps ({Hp * DT:.0f} s), from (theta, omega) = (pi, 0), initial torques "
           f"N(0, 0.1^2): {it_p} iterations, {t_p:.2f} s; model return {J_p:.2f} (start {hist_p[0]:.2f}); "
-          f"|theta mod 2pi| < 0.1 from step {t_up}; torque at the limit in {100 * sat:.0f}% of steps; "
-          f"max |omega| = {np.max(np.abs(S_p[:, 1])):.2f}")
+          f"turning points before the ascent at {', '.join(f'{x:+.1f}' for x in turns)} degrees from the bottom; "
+          f"|theta mod 2pi| < 0.1 from step {t_up}"
+          f"{' on' if stays else ' (but not for good)'}; torque at the limit in {100 * sat:.0f}% of steps; "
+          f"max |omega| = {np.max(np.abs(S_p[:, 1])):.2f}"
+          f"{' < 8, so Gymnasium speed clip never acts' if np.max(np.abs(S_p[:, 1])) < 8 else ' (exceeds the speed clip 8!)'}")
     _, _, _, _, J_z, hist_z, it_z = ilqr(pend_f, pend_derivs, pend_terminal, s_down, np.zeros((Hp, 1)),
                                          lo=-AMAX, hi=AMAX, max_iter=40 if quick else 300)
     print(f"  from zero torques: stops after {it_z} iteration(s) with return {J_z:.2f} "
           f"(hanging at rest is a stationary point: the gradient vanishes by symmetry)")
+    # The reward Hessian above is the Gauss-Newton term -2cos^2(theta/2) <= 0. With the exact curvature
+    # -2cos(theta), which is positive near the bottom, Q_aa loses definiteness and the regulariser must act.
+    st_ex = {"indefinite": 0}
+    S_e, _, _, _, J_e, _, it_e = ilqr(pend_f, pend_derivs_exact, pend_terminal_exact, s_down, U_init,
+                                      lo=-AMAX, hi=AMAX, max_iter=40 if quick else 300, stats=st_ex)
+    print(f"  Q_aa not negative definite (backward pass restarted with larger mu): {st_gn['indefinite']} times "
+          f"with the Gauss-Newton reward Hessian; {st_ex['indefinite']} times in {it_e} iterations with the exact "
+          f"Hessian, which reaches return {J_e:.2f}"
+          f"{' (swing-up)' if np.any(np.cos(S_e[:, 0]) > np.cos(0.1)) else ' (no swing-up)'}")
     figdata["ilqr"] = {"S": S_p, "U": U_p, "hist": hist_p}
     if not quick:
         # iLQR is a local method: repeat from 10 random initial torque sequences, for H = 100 and H = 200.
@@ -493,21 +531,28 @@ def main():
             res = []
             for seed in range(10):
                 U0s = 0.1 * np.random.default_rng(seed).normal(size=(Hs, 1))
+                t0 = time.perf_counter()
                 S_s, _, _, _, J_s, _, it_s = ilqr(pend_f, pend_derivs, pend_terminal, s_down, U0s,
                                                   lo=-AMAX, hi=AMAX)
+                t_s = time.perf_counter() - t0
                 swung = np.any(np.cos(S_s[:, 0]) > np.cos(0.1))
-                res.append((seed, J_s, it_s, swung))
+                res.append((seed, J_s, it_s, swung, S_s[-1, 0] > np.pi, t_s,
+                            np.degrees(np.max(np.abs(S_s[:, 0] - np.pi)))))
                 if Hs == 2 * Hp and not swung and "S200" not in figdata["ilqr"]:
                     figdata["ilqr"]["S200"] = S_s
             ok = [r for r in res if r[3]]
             bad = [r for r in res if not r[3]]
             msg = (f"  H = {Hs}, initial torques N(0, 0.1^2), seeds 0-9: {len(ok)}/10 swing up"
-                   + (f" (return {np.mean([r[1] for r in ok]):.2f}, {min(r[2] for r in ok)}-"
-                      f"{max(r[2] for r in ok)} iterations)" if ok else ""))
+                   + (f" (return {min(r[1] for r in ok):.2f} to {max(r[1] for r in ok):.2f}, "
+                      f"{min(r[2] for r in ok)}-{max(r[2] for r in ok)} iterations, "
+                      f"{min(r[5] for r in ok):.1f}-{max(r[5] for r in ok):.1f} s per run; "
+                      f"{sum(r[4] for r in ok)} end at theta = 2pi and {sum(not r[4] for r in ok)} at "
+                      f"theta = 0, i.e. mirror-image swing-ups)" if ok else ""))
             if bad:
-                msg += (f"; {len(bad)}/10 stop at a local optimum that never lifts the pendulum (return "
+                msg += (f"; {len(bad)}/10 stop at a local optimum that never swings it up (return "
                         f"{min(r[1] for r in bad):.2f} to {max(r[1] for r in bad):.2f}, "
-                        f"{min(r[2] for r in bad)}-{max(r[2] for r in bad)} iterations)")
+                        f"{min(r[2] for r in bad)}-{max(r[2] for r in bad)} iterations; it only rocks "
+                        f"the pendulum by at most {max(r[6] for r in bad):.0f} degrees from the bottom)")
             print(msg)
     # (iii) execute in Gymnasium: iLQR's time-varying feedback, then an LQR "catch" at the top.
     import gymnasium as gym

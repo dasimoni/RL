@@ -330,7 +330,9 @@ def main():
     # (d) MaxEnt learning curve
     ax = fig.add_subplot(gs[1, 0])
     ks = [h[0] for h in hist]
-    ax.semilogy(ks, [h[1] for h in hist], color=C[0], label=r"MaxEnt $\|\mu_E-\mu_\omega\|$")
+    ax.semilogy(ks, [h[1] for h in hist], color=C[0], label=rf"MaxEnt MAP ($\ell_2$={l2}) $\|\mu_E-\mu_\omega\|$")
+    ax.semilogy([h[0] for h in hist_ml], [h[1] for h in hist_ml], color=C[0], ls=":", lw=1.6,
+                label=r"MaxEnt max. likelihood $\|\mu_E-\mu_\omega\|$")
     ax.set_xlabel("MaxEnt gradient step")
     ax.set_ylabel("feature-expectation gap")
     ax2 = ax.twiny()

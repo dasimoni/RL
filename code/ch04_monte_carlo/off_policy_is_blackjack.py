@@ -97,7 +97,7 @@ def main():
     print(f"Off-policy IS on Blackjack state {START} | seed={args.seed} runs={runs} "
           f"episodes/run={n_ep:,} b=uniform random, pi=stick on 20/21")
     v = solve(stick_on_20_policy())["V"][START[0] - 12, START[1] - 1, START[2]]
-    v_check = exact_b_moment(lambda g: g, 1)              # E_b[rho G] must equal v (Prop. 6.1)
+    v_check = exact_b_moment(lambda g: g, 1)              # E_b[rho G] must equal v (Prop. 4.4)
     var_o = exact_b_moment(lambda g: g * g, 2) - v * v    # Var_b[rho G]
     m_w = exact_b_moment(lambda g: (g - v) ** 2, 2)       # E_b[rho^2 (G - v)^2]
     p_pos = exact_b_moment(lambda g: 1.0, 0)              # P_b(rho > 0)

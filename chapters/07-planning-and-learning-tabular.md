@@ -15,7 +15,7 @@ So far the course has had two families of methods. **Dynamic programming** ([Cha
 5. Derive the error of $t$ sample updates for a branching factor $b$, $\sqrt{(b-1)/(bt)}$, and use it to argue when sample updates beat expected updates.
 6. Explain trajectory sampling and real-time dynamic programming (RTDP), and state the conditions under which RTDP converges without visiting every state.
 7. Describe decision-time planning: heuristic search, rollout algorithms, and Monte Carlo Tree Search (MCTS). Implement UCT with negamax backups and transpositions for a two-player game, and verify it against an exact minimax solver.
-8. Place every method in the course so far on the "dimensions of RL methods" map.
+8. Place every tabular method of Chapters 03–07 on the "dimensions of RL methods" map.
 
 **Prerequisites.** MDPs and Bellman equations ([Chapter 01](01-the-rl-problem.md)); value iteration, asynchronous DP and the greedy-policy loss bound ([Chapter 03](03-dynamic-programming.md)); Monte Carlo control ([Chapter 04](04-monte-carlo.md)), on which rollout algorithms and MCTS build; Q-learning ([Chapter 05](05-temporal-difference.md)); $n$-step methods ([Chapter 06](06-n-step-and-eligibility-traces.md)), which reappear in the dimensions map of Section 13; the UCB1 bandit algorithm ([Chapter 02](02-multi-armed-bandits.md)), which MCTS reuses at every tree node.
 
@@ -34,7 +34,7 @@ So far the course has had two families of methods. **Dynamic programming** ([Cha
 
 **Study time.** About 8–10 hours: 4–5 for the text and derivations, 1–2 to run and modify the code, 3 for the exercises.
 
-**Notation.** We follow [NOTATION.md](../NOTATION.md). Departures, all local to this chapter: $b$ is a **branching factor** (number of possible next states), not a behaviour policy; $\tau(s,a)$ in Dyna-Q+ is **the number of time steps since $(s,a)$ was last tried**, not a temperature or a Polyak coefficient; $\theta$ (not bold) is the **priority threshold** of prioritized sweeping, not a policy parameter vector; $\mathrm{Pri}(s,a)$ is the **priority** of a pair in prioritized sweeping, while $P(s,a)$ in Section 11.4 is a **prior probability** (PUCT); in MCTS, $N(s)$, $N(s,a)$ are visit counts, $W(s,a)$ is a sum of simulation returns and $c$ is the exploration constant (so the children in our worked examples are called $x, y, z$, never $b$ or $c$).
+**Notation.** We follow [NOTATION.md](../NOTATION.md). Departures, all local to this chapter: $b$ is a **branching factor** (number of possible next states), not a behaviour policy; $\tau(s,a)$ in Dyna-Q+ is **the number of time steps since $(s,a)$ was last tried**, not a temperature or a Polyak coefficient; $\theta$ (not bold) is the **priority threshold** of prioritized sweeping, not a policy parameter vector; $\mathrm{Pri}(s,a)$ is the **priority** of a pair in prioritized sweeping, while $P(s,a)$ in Section 11.4 is a **prior probability** (PUCT); in MCTS, $N(s)$, $N(s,a)$ are visit counts, $W(s,a)$ is a sum of simulation returns and $c$ is the exploration constant (so the children in our worked examples are called $x, y, z$, never $b$ or $c$). $n$ is the **number of planning updates per real step** (Sutton & Barto's Dyna convention; in the UCT result of Section 11.2 it counts simulations), not the $n$ of $n$-step returns ([Chapter 06](06-n-step-and-eligibility-traces.md)), which appear here only on the map of Section 13.
 
 ---
 
@@ -360,14 +360,16 @@ The lesson generalises. **Prioritized sweeping buys planning efficiency, not exp
 
 ## 6. Expected vs sample updates
 
-We now have two ways to update a value from a model. An **expected update** averages over all possible next states using a distribution model. A **sample update** uses one sampled next state. Crossing this with *what* is updated ($v$ or $q$, for $\pi$ or optimal) gives the seven one-step updates of the course so far:
+We now have two ways to update a value from a model. An **expected update** averages over all possible next states using a distribution model. A **sample update** uses one sampled next state. Crossing this with *what* is updated ($v$ or $q$, for $\pi$ or optimal) gives the basic one-step updates:
 
 | value | expected update (needs a distribution model) | sample update (works with a sample model or real experience) |
 |---|---|---|
 | $v_\pi$ | policy evaluation (Ch. 03): $V(s) \leftarrow \sum_a \pi(a\mid s)\sum_{s',r}p(s',r\mid s,a)[r + \gamma V(s')]$ | TD(0) (Ch. 05): $V(s) \leftarrow V(s) + \alpha[R + \gamma V(S') - V(s)]$ |
 | $v_\ast$ | value iteration (Ch. 03): $V(s) \leftarrow \max_a \sum_{s',r}p(s',r\mid s,a)[r + \gamma V(s')]$ | (none: the max over actions needs the model) |
-| $q_\pi$ | $Q(s,a) \leftarrow \sum_{s',r}p(s',r\mid s,a)[r + \gamma \sum_{a'}\pi(a'\mid s')Q(s',a')]$ | Sarsa (Ch. 05): $Q \leftarrow Q + \alpha[R + \gamma Q(S',A') - Q]$ |
-| $q_\ast$ | Q-value iteration: $Q(s,a) \leftarrow \sum_{s',r}p(s',r\mid s,a)[r + \gamma \max_{a'}Q(s',a')]$ | Q-learning (Ch. 05): $Q \leftarrow Q + \alpha[R + \gamma \max_{a'}Q(S',a') - Q]$ |
+| $q_\pi$ | policy evaluation on $Q$ (Ch. 03, eq. 3.13a): $Q(s,a) \leftarrow \sum_{s',r}p(s',r\mid s,a)[r + \gamma \sum_{a'}\pi(a'\mid s')Q(s',a')]$ | Sarsa (Ch. 05): $Q \leftarrow Q + \alpha[R + \gamma Q(S',A') - Q]$ |
+| $q_\ast$ | Q-value iteration (Ch. 03, Sec. 2.6): $Q(s,a) \leftarrow \sum_{s',r}p(s',r\mid s,a)[r + \gamma \max_{a'}Q(s',a')]$ | Q-learning (Ch. 05): $Q \leftarrow Q + \alpha[R + \gamma \max_{a'}Q(S',a') - Q]$ |
+
+Expected Sarsa ([Chapter 05](05-temporal-difference.md), eq. 5.14) is also a sample update, since it samples the environment's $(R, S')$. But where Sarsa samples the next action $A'$, it takes the expectation over it, $\sum_{a'}\pi(a'\mid S')Q(S',a')$, just as Q-learning takes the max; with a greedy $\pi$ the two are the same update. It sits in the $q_\pi$ row between Sarsa and the expected update: sampled over the environment, expected over the policy.
 
 An expected update has no sampling error, but it costs time proportional to the **branching factor** $b$, the number of possible next states. If we have only a limited amount of computation, is one expected update better than $b$ sample updates spread over $b$ different pairs? The following analysis, Sutton & Barto's Section 8.5 worked out in full, answers this.
 
@@ -606,7 +608,7 @@ Return argmax_a q_hat(a)                                  # act, then discard q_
 
 In a two-player game the "sample model" includes the opponent's replies (in our tic-tac-toe experiment, both sides play the random rollout policy), and $G$ is the final result for the player to move at $s$.
 
-**Why it works.** If the estimates were exact, the action taken in every state would be $\pi'(s) = \arg\max_a q_\pi(s,a)$. By the policy improvement theorem ([Chapter 03](03-dynamic-programming.md)), $q_\pi(s, \pi'(s)) \ge v_\pi(s)$ for all $s$ implies $v_{\pi'} \ge v_\pi$. So **a rollout algorithm is at least as good as its rollout policy** (up to estimation error). It is one step of policy iteration, performed lazily, only at the states actually encountered. It is *not* in general optimal: it improves $\pi$ once rather than iterating to $\pi_\ast$.
+**Why it works.** If the estimates were exact, the action taken in every state would be $\pi'(s) = \arg\max_a q_\pi(s,a)$. By the policy improvement theorem ([Chapter 03](03-dynamic-programming.md)), $q_\pi(s, \pi'(s)) \ge v_\pi(s)$ for all $s$ implies $v_{\pi'} \ge v_\pi$. This holds for $\gamma < 1$, or when every policy terminates, as in tic-tac-toe. With $\gamma = 1$ an improper $\pi'$ can be worse ([Chapter 03](03-dynamic-programming.md), Section 4.1 and Exercise 11). For a deterministic rollout policy that terminates, breaking ties in favour of $\pi(s)$ avoids this (Exercise 8). With these provisos, **a rollout algorithm is at least as good as its rollout policy** (up to estimation error). It is one step of policy iteration, performed lazily, only at the states actually encountered. It is *not* in general optimal: it improves $\pi$ once rather than iterating to $\pi_\ast$.
 
 Rollout algorithms are simple, need only a sample model and a base policy, and are trivially parallel: every trajectory is independent. Their quality depends on the base policy and on the number of trajectories. A common speed-up truncates trajectories and adds a value-function estimate at the cut. Tesauro & Galperin (1997) used Monte Carlo rollouts on-line to improve backgammon programs; Bertsekas, Tsitsiklis & Wu (1997) developed rollout algorithms for combinatorial optimisation.
 
@@ -767,7 +769,7 @@ UCT **never lost** (0 losses in 500 games against the random and perfect players
 
 ## 13. Summary of the dimensions of RL methods
 
-All the methods of Part I share three ideas: they estimate value functions, they update those estimates by backing up values along actual or possible trajectories, and they follow generalised policy iteration ([Chapter 03](03-dynamic-programming.md)). They differ along a few dimensions. The two most important define a plane (Sutton & Barto, Section 8.13):
+All the tabular methods of Chapters 03–07, the core of Sutton & Barto's Part I, share three ideas: they estimate value functions, they update those estimates by backing up values along actual or possible trajectories, and they follow generalised policy iteration ([Chapter 03](03-dynamic-programming.md)). They differ along a few dimensions. The two most important define a plane (Sutton & Barto, Section 8.13):
 
 ```
                               WIDTH of the update
@@ -908,7 +910,7 @@ for n in path:
 - **Decision-time planning** spends computation on the current state. Deeper full-width search reduces the effect of evaluation errors by $\gamma^d$ but costs exponentially more.
 - **Rollout algorithms** improve their rollout policy by one step of policy improvement; they are not optimal.
 - **MCTS/UCT** keeps a growing tree, picks actions in it with UCB1, rolls out beyond it, and backs up returns. In two-player games, **negamax backups** keep every node's value from its mover's perspective. UCT is consistent; our tic-tac-toe UCT, verified against an exact solver, never lost and always drew against itself.
-- Every method so far sits in a space of **update width** (sample–expected) × **update depth** (bootstrap–full return), plus on/off-policy, plus *where* and *when* updates are made.
+- Every tabular method of Chapters 03–07 sits in a space of **update width** (sample–expected) × **update depth** (bootstrap–full return), plus on/off-policy, plus *where* and *when* updates are made.
 
 ## Key equations
 
@@ -1076,7 +1078,7 @@ The general point: whether "more planning" helps depends on whether exploration 
 
 </details>
 
-**Exercise 8 ★★ (rollout algorithms).** (a) Prove that a rollout algorithm with exact action-value estimates performs at least as well as its rollout policy. (b) In tic-tac-toe, flat Monte Carlo with infinitely many random rollouts picks a minimax-optimal move in only 95% of non-trivial positions. Explain how random-play evaluation can prefer a losing move. (c) What happens if you use a rollout algorithm as the rollout policy of another rollout algorithm?
+**Exercise 8 ★★ (rollout algorithms).** (a) Prove that a rollout algorithm with exact action-value estimates performs at least as well as its rollout policy. What does the proof need when $\gamma = 1$? (b) In tic-tac-toe, flat Monte Carlo with infinitely many random rollouts picks a minimax-optimal move in only 95% of non-trivial positions. Explain how random-play evaluation can prefer a losing move. (c) What happens if you use a rollout algorithm as the rollout policy of another rollout algorithm?
 
 <details><summary>Solution</summary>
 
@@ -1085,6 +1087,8 @@ The general point: whether "more planning" helps depends on whether exploration 
 $$
 v_\pi(s) \le q_\pi(s,\pi'(s)) = \mathbb{E}_{\pi'}[R_{t+1} + \gamma v_\pi(S_{t+1}) \mid S_t = s] \le \mathbb{E}_{\pi'}[R_{t+1} + \gamma q_\pi(S_{t+1},\pi'(S_{t+1})) \mid S_t = s] \le \cdots \le v_{\pi'}(s).
 $$
+
+The last step, the limit, needs $\gamma < 1$ or a proper $\pi'$, one that terminates from every state (Chapter 03, Section 4.1). In tic-tac-toe every policy terminates within nine moves, so the guarantee holds. With $\gamma = 1$, an improper $\pi'$ can be worse. Chapter 03's Exercise 11 is a counterexample: with rollout policy "exit" ($+1$), "stay" ties with it at $q_\pi = 1$, and a rollout algorithm that breaks the tie towards "stay" never terminates and earns $0 < 1$. For a deterministic, proper $\pi$, breaking ties in favour of $\pi(s)$ avoids this. Then $\pi'$ leaves $\pi$ only where $q_\pi(s,\pi'(s)) > v_\pi(s)$. Take a recurrent class $C$ of $\pi'$ from which it never terminates, and average the inequality $v_\pi(s) \le r(s,\pi'(s)) + \sum_{s'}p(s'\mid s,\pi'(s))\,v_\pi(s')$ over $\pi'$'s stationary distribution on $C$. The $v_\pi$ terms cancel, so the average reward per step on $C$ is $\ge 0$. It is in fact $> 0$: $\pi'$ must differ from $\pi$ somewhere in $C$ (otherwise $\pi$ would never leave $C$ either), the inequality is strict there, and the stationary distribution puts positive weight on every state of $C$. So $\pi'$ can fail to terminate only by collecting unbounded reward, which is not worse than $\pi$. For a stochastic $\pi$ this tie rule is not enough. In the same one-state example with $\pi$ uniform over exit and stay, $v_\pi(s) = \tfrac12 \cdot 1 + \tfrac12\, v_\pi(s)$ gives $v_\pi(s) = 1$, both actions again have $q_\pi = 1$, and both are in the support of $\pi$.
 
 In a two-player game, "the environment" includes the opponent, so the guarantee holds against the opponent model used in the rollouts (here: a random opponent), not against a strong opponent.
 
@@ -1237,3 +1241,7 @@ Conclusions. (1) With an uninformative prior, PUCT behaved about like UCT here (
 - **Russell & Norvig, *Artificial Intelligence: A Modern Approach* (4th ed., 2020), chapters on search and adversarial search.** Background on A\*, minimax, alpha–beta and the heuristic-search tradition that RTDP and MCTS grew out of.
 - **Moerland, Broekens, Plaat & Jonker, "Model-based reinforcement learning: A survey" (*Foundations and Trends in Machine Learning*, 2023).** Organises model-based RL along the dimensions of this chapter (what model, how to plan, where to plan, how to integrate planning and learning), and connects the tabular ideas to deep model-based RL.
 - **Silver et al., "A general reinforcement learning algorithm that masters chess, shogi, and Go through self-play" (*Science*, 2018).** AlphaZero: what MCTS becomes with learned value and policy networks. Read it after this chapter and before [Chapter 13](13-model-based-rl.md).
+
+---
+
+[← Previous: n-Step Bootstrapping and Eligibility Traces](06-n-step-and-eligibility-traces.md) · [Course index](../README.md) · [Next: Value Function Approximation](08-function-approximation.md) →

@@ -114,8 +114,8 @@ def main() -> None:
           f"= {exp_len[start]:.3f}")
     succ, lens, tr = run_episodes(env, lambda s: int(rng.integers(4)), n_rand, seed)
     se = succ.std(ddof=1) / np.sqrt(n_rand)
-    print(f"  simulated through gymnasium ({n_rand} episodes): success {succ.mean():.4f} +- {1.96 * se:.4f}, "
-          f"mean length {lens.mean():.3f}, truncated by the time limit: {tr.sum()}")
+    print(f"  simulated through gymnasium ({n_rand} episodes): success {succ.mean():.4f} +- {1.96 * se:.4f} "
+          f"(95% CI half-width; one standard error = {se:.4f}), mean length {lens.mean():.3f}, truncated by the time limit: {tr.sum()}")
 
     # ---- optimal policy (gamma = 1: v_* = maximal probability of reaching the goal)
     v_star, deltas = value_iteration(mdp, gamma, tol=1e-13)
@@ -172,7 +172,8 @@ def main() -> None:
     succ_o, lens_o, tr_o = run_episodes(env, lambda s: int(pi_star[s]), n_opt, seed + 1)
     se_o = succ_o.std(ddof=1) / np.sqrt(n_opt)
     print(f"  simulated with the default 100-step TimeLimit ({n_opt} episodes): success "
-          f"{succ_o.mean():.4f} +- {1.96 * se_o:.4f} (exact within 100: {within[2]:.4f}; "
+          f"{succ_o.mean():.4f} +- {1.96 * se_o:.4f} (95% CI half-width; one standard error = {se_o:.4f}; "
+          f"exact within 100: {within[2]:.4f}; "
           f"without a limit: {v_star[start]:.4f}); truncated episodes: {tr_o.mean():.3f}")
 
     if not args.quick:
@@ -208,7 +209,7 @@ def main() -> None:
                 label="best time-aware policy (sees steps left)")
         ax.axhline(v_star[start], color=ORANGE, ls="--", label=rf"$v_\ast$(start) = {v_star[start]:.3f} (no limit)")
         ax.errorbar([100], [succ_o.mean()], yerr=[1.96 * se_o], fmt="o", color=INK, ms=5, capsize=3,
-                    label=f"simulated with TimeLimit(100): {succ_o.mean():.3f}")
+                    label=f"simulated with TimeLimit(100): {succ_o.mean():.3f} (bar: 95% CI)")
         ax.axvline(100, color=INK2, lw=0.8, ls=":")
         ax.set_xscale("log")
         ax.set_xlabel("step limit H (log scale)")

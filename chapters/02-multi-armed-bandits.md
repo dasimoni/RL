@@ -245,7 +245,7 @@ $$
 \tag{4.3}
 $$
 
-The first condition makes the steps large enough to overcome the initial value and any fluctuations. The second makes them eventually small enough to average the noise away. The sample average $\alpha_n = 1/n$ satisfies both. A constant $\alpha$ violates the second, so the estimate keeps fluctuating, and that is exactly what we want when the target moves. Step sizes that satisfy (4.3) often converge slowly or need careful tuning, so they are used mainly in theory.
+The first condition makes the steps large enough to overcome the initial value and any fluctuations. The second makes them eventually small enough to average the noise away. The sample average $\alpha_n = 1/n$ satisfies both. A constant $\alpha$ violates the second, so the estimate keeps fluctuating, and that is exactly what we want when the target moves. For stationary averaging the schedule $\alpha_n = 1/n$ is the natural choice, and Algorithm 2.1 and this chapter's ε-greedy and UCB agents on stationary bandits use it. For moving or bootstrapped targets, schedules that satisfy (4.3) can be slow ([Chapter 05](05-temporal-difference.md), Section 8.4, compares $1/n$ with $1/n^{0.6}$), and a target that keeps drifting outruns any decaying schedule (§4.4). Practice therefore often uses a constant $\alpha$ instead, accepting a noise floor in exchange for tracking ([Chapter 00 §3.4](00-math-toolkit.md)).
 
 ### 4.3 Removing the initial bias
 
@@ -545,7 +545,7 @@ The weaknesses of the Bayesian view are the flip side of its strengths:
 
 * **Model misspecification.** The posterior is only as good as the likelihood and the prior. A prior that is too narrow ($s_0 = 1/16$ in §10) makes Thompson sampling too timid.
 * **Stationarity.** A standard posterior assumes the parameters never change, so it keeps concentrating. In the drifting bandit of §4.4 that left it no better than sample averages.
-* **Computation.** Conjugate models are trivial. Neural-network reward models need approximate posteriors (bootstrapped ensembles, Laplace approximations), which [Chapter 14](14-exploration.md) discusses. Posterior sampling also extends to full MDPs as **PSRL** (posterior sampling for RL).
+* **Computation.** Conjugate models are trivial. Neural-network reward models need approximate posteriors. [Chapter 14](14-exploration.md) discusses two: bootstrapped ensembles with randomized prior functions (§4.3), and Bayesian linear regression on features (§4.2, the idea behind RLSVI), which can be applied to a network's learned features. Laplace approximations are another option that this course does not cover. Posterior sampling also extends to full MDPs as **PSRL** (posterior sampling for RL).
 
 ---
 
@@ -1038,7 +1038,7 @@ Using losses rather than rewards matters in the first step: it keeps $\hat\ell \
 
 EXP3's regret almost exactly doubles every time $T$ quadruples (×1.97, ×1.94), the $\sqrt T$ rate, while Thompson sampling grows ×1.28 and ×1.24, close to the logarithmic ×1.18 and ×1.15. UCB1 has a large constant but a slowing growth rate (×1.73, ×1.43). Robustness to adversaries costs the logarithmic rates on benign problems. *Best-of-both-worlds* algorithms such as Tsallis-INF (Zimmert & Seldin, 2021) get near-optimal regret in both regimes without knowing which one they are in.
 
-EXP3 is also a bridge to later chapters. It is online mirror descent with an entropy regulariser, the same mathematics as KL-regularised policy updates ([Chapter 11](11-trust-regions-and-ppo.md), [Chapter 18](18-rl-for-language-models.md)). When every player in a game runs a no-regret algorithm like it, the empirical distribution of play converges to a coarse correlated equilibrium, and in two-player zero-sum games the time-averaged strategies converge to a Nash equilibrium ([Chapter 17](17-multi-agent-rl.md)).
+EXP3 is also a bridge to later chapters. It is online mirror descent with an entropy regulariser, the same mathematics as KL-regularised policy updates ([Chapter 11](11-trust-regions-and-ppo.md), [Chapter 18](18-rl-for-language-models.md)). When every player in a game runs a no-regret algorithm like it, the empirical distribution of play approaches the set of coarse correlated equilibria (its distance to that set goes to zero, though it need not settle on any single one), and in two-player zero-sum games the time-averaged strategies converge to the set of Nash equilibria ([Chapter 17](17-multi-agent-rl.md) §5.4–5.5).
 
 ---
 
@@ -1159,7 +1159,7 @@ Loop for t = 1, 2, ..., T:
 
 The best single arm loses 0.191 per step against the contextual oracle, or 956 over the horizon. The context-free learner essentially finds that arm and pays this linear regret (0.194 per step). Every contextual learner does far better. LinUCB with α around 0.5–1 is best. Greedy ridge regression does surprisingly well on average but has a ten times larger standard error. In most runs, the variety of contexts provides "free" exploration (each arm is tried in different directions just because the contexts differ), but in some runs an arm is starved early and never recovers. Kannan et al. (2018) and Bastani, Bayati and Khosravi (2021) study when greedy is enough. Fixed ε-greedy keeps paying for its random exploration on every step (0.068 per step in the second half, 13 times LinUCB's).
 
-Beyond linear models, the same ideas power neural contextual bandits, which use ensembles or last-layer posteriors for uncertainty ([Chapter 14](14-exploration.md)). EXP4 (Auer et al., 2002) competes with a finite class of policies in the adversarial setting, and Epoch-Greedy (Langford & Zhang, 2007) is a simple explore-first approach for general policy classes.
+Beyond linear models, the same ideas power neural contextual bandits, which get their uncertainty from ensembles ([Chapter 14](14-exploration.md) §4.3) or from Bayesian linear regression on the last layer's features (the idea behind RLSVI, Chapter 14 §4.2). EXP4 (Auer et al., 2002) competes with a finite class of policies in the adversarial setting, and Epoch-Greedy (Langford & Zhang, 2007) is a simple explore-first approach for general policy classes.
 
 ---
 

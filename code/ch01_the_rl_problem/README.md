@@ -34,4 +34,5 @@ Runtimes were measured on one core of a shared 4-CPU machine and vary somewhat b
 
 * `mdp.py`, `gridworld.py` and `plotting.py` are imported by the other scripts. Python finds them because each script's own folder is on `sys.path` when it is run as `python code/ch01_the_rl_problem/<script>.py`.
 * Terminal states follow the absorbing-state convention (they loop to themselves with reward 0). With gamma = 1, `evaluate_policy_exact` solves only on non-terminal states, which requires a policy that terminates with probability 1. The chapter writes that restricted matrix as P~_pi (P_pi restricted to non-terminal states); the scripts print it under the same name.
+* `+-` in the script output and in the headline results above is a 95% confidence half-width (1.96 standard errors), as in the chapter. `frozenlake_exact.py` also prints one standard error (0.0009 and 0.0044 for its two simulations), which is the convention Chapter 03 uses.
 * The Gymnasium loop in `frozenlake_exact.py` seeds only the first `reset` and lets the environment's RNG stream continue, and it distinguishes `terminated` from `truncated`.

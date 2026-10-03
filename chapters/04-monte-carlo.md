@@ -155,7 +155,7 @@ The two methods disagree only for states that recur within an episode. Which one
 
 Fix a state $s$ that is visited with positive probability. Assume the returns have finite variance. Bounded rewards plus an episode length with finite variance are enough, and that holds for any policy in a finite MDP whose episodes terminate with probability 1, since episode lengths then have geometric tails.
 
-**Theorem 2.1 (first-visit MC).** Let $G^{(1)}, G^{(2)}, \dots$ be the first-visit returns from successive episodes that visit $s$, and let $V_n(s)$ be their average after $n$ of them. Then
+**Theorem 4.1 (first-visit MC).** Let $G^{(1)}, G^{(2)}, \dots$ be the first-visit returns from successive episodes that visit $s$, and let $V_n(s)$ be their average after $n$ of them. Then
 
 1. the $G^{(i)}$ are i.i.d. with mean $v_\pi(s)$ and some variance $\sigma^2(s)$;
 2. $V_n(s)$ is **unbiased**: $\mathbb{E}[V_n(s)] = v_\pi(s)$;
@@ -184,7 +184,7 @@ $$
 
 with the convention that $V_n^{\text{EV}}(s)$ keeps its initial value $V_0(s)$ while $\sum_i K_i = 0$. The returns within one episode overlap, and the number of terms $K_i$ is random and correlated with them. So this is *not* an average of i.i.d. samples of $v_\pi(s)$.
 
-**Theorem 2.2 (every-visit MC).** (a) $V_n^{\text{EV}}(s) \to v_\pi(s)$ with probability 1: every-visit MC is **consistent**. (b) It is **biased** in general: there are processes in which $\mathbb{E}\big[V_n^{\text{EV}}(s) \,\big|\, \textstyle\sum_i K_i > 0\big] \neq v_\pi(s)$.
+**Theorem 4.2 (every-visit MC).** (a) $V_n^{\text{EV}}(s) \to v_\pi(s)$ with probability 1: every-visit MC is **consistent**. (b) It is **biased** in general: there are processes in which $\mathbb{E}\big[V_n^{\text{EV}}(s) \,\big|\, \textstyle\sum_i K_i > 0\big] \neq v_\pi(s)$.
 
 *Proof of (a).* The pairs $(Y_i, K_i)$ are i.i.d. across episodes. By the strong law of large numbers applied to numerator and denominator (each divided by $n$), $V_n^{\text{EV}} \to \mathbb{E}[Y]/\mathbb{E}[K]$. Now compute $\mathbb{E}[Y]$ using the same tower-property step as before, at every visit instead of the first:
 
@@ -239,16 +239,16 @@ The simulation matches the analysis. Every-visit wins for $n \le 3$. The two are
 
 ### 2.4 Incremental implementation
 
-Storing every return and re-averaging is wasteful. If $V_n$ is the average of the first $n-1$ returns $G_1, \dots, G_{n-1}$ observed from $s$, then
+Storing every return and re-averaging is wasteful. As in Theorem 4.1, a superscript counts returns: $G^{(k)}$ is the $k$-th return observed from $s$, whereas a subscript, as in $G_t$, is a time step. If $V_n$ is the average of the first $n-1$ returns $G^{(1)}, \dots, G^{(n-1)}$ observed from $s$, then
 
 $$
 \begin{aligned}
-V_{n+1} &= \frac{1}{n}\sum_{k=1}^{n} G_k = \frac{1}{n}\Big(G_n + (n-1)\, V_n\Big) \\
-&= V_n + \frac{1}{n}\big(G_n - V_n\big).
+V_{n+1} &= \frac{1}{n}\sum_{k=1}^{n} G^{(k)} = \frac{1}{n}\Big(G^{(n)} + (n-1)\, V_n\Big) \\
+&= V_n + \frac{1}{n}\big(G^{(n)} - V_n\big).
 \end{aligned}
 $$
 
-This is the same "NewEstimate ← OldEstimate + StepSize × (Target − OldEstimate)" rule as for bandits ([Chapter 02](02-multi-armed-bandits.md)). Here the target is the return $G_t$. The pseudocode in Section 2.1 uses this rule with a per-state counter $N(s)$.
+This is the same "NewEstimate ← OldEstimate + StepSize × (Target − OldEstimate)" rule as for bandits ([Chapter 02](02-multi-armed-bandits.md)). Here the target is a return: if the $n$-th visit to $s$ happens at time $t$ of its episode, then $G^{(n)} = G_t$. The pseudocode in Section 2.1 uses this rule with a per-state counter $N(s)$.
 
 Replacing $1/n$ by a **constant step size** $\alpha \in (0, 1]$ gives **constant-$\alpha$ MC**:
 
@@ -277,7 +277,7 @@ One caveat about "exact". Because of the way naturals are represented (Section 1
 
 ![RMS error of first-visit MC prediction against exact values, five seeds, with sample-average and constant-step-size updates. The dotted reference line has slope -1/2 and is anchored at the last point.](../code/ch04_monte_carlo/figures/blackjack_mc_prediction_rms.png)
 
-The RMS error falls with slope $-0.49$ on log-log axes ($-0.488$ fitted over $n \ge 10^3$, $-0.493$ over $n \ge 10^4$), close to the $-1/2$ that Theorem 2.1 predicts. Below about $10^3$ episodes the curve is flatter, because there the error is dominated by rarely visited states that still hold their initial value 0. The constant-$\alpha$ version ($\alpha = 0.01$) starts more slowly, because each update moves only 1% of the way to the target, and then stalls at an RMS error of about 0.056 after 500,000 episodes. That is the variance floor of a fixed step size.
+The RMS error falls with slope $-0.49$ on log-log axes ($-0.488$ fitted over $n \ge 10^3$, $-0.493$ over $n \ge 10^4$), close to the $-1/2$ that Theorem 4.1 predicts. Below about $10^3$ episodes the curve is flatter, because there the error is dominated by rarely visited states that still hold their initial value 0. The constant-$\alpha$ version ($\alpha = 0.01$) starts more slowly, because each update moves only 1% of the way to the target, and then stalls at an RMS error of about 0.056 after 500,000 episodes. That is the variance floor of a fixed step size.
 
 One more check: the script runs first-visit and every-visit MC on the same 20,000 episodes and gets **identical** estimates (maximum difference 0). In Blackjack a state can never recur within an episode. Exercise 1 asks you to explain why.
 
@@ -413,7 +413,7 @@ Among $\varepsilon$-soft policies, $\varepsilon$-greedy ones are the closest to 
 
 ### 5.2 ε-greedy policy improvement works within the ε-soft class
 
-**Theorem 5.1.** Assume $\gamma < 1$, or $\gamma = 1$ with every policy terminating with probability 1 as in Section 1.2 (so that $\pi'$ below is proper). Let $\pi$ be any $\varepsilon$-soft policy with $0 < \varepsilon < 1$, and let $\pi'$ be $\varepsilon$-greedy with respect to $q_\pi$. Then $v_{\pi'}(s) \ge v_\pi(s)$ for all $s \in \mathcal{S}$.
+**Theorem 4.3.** Assume $\gamma < 1$, or $\gamma = 1$ with every policy terminating with probability 1 as in Section 1.2 (so that $\pi'$ below is proper). Let $\pi$ be any $\varepsilon$-soft policy with $0 < \varepsilon < 1$, and let $\pi'$ be $\varepsilon$-greedy with respect to $q_\pi$. Then $v_{\pi'}(s) \ge v_\pi(s)$ for all $s \in \mathcal{S}$.
 
 *Proof.* Write $m \doteq \lvert\mathcal{A}(s)\rvert$. The expected action value under $\pi'$ is
 
@@ -508,6 +508,8 @@ The runs behave as the fixed-point analysis of Section 5.3 suggests. The value o
 
 **Decaying ε.** If $\varepsilon_k \to 0$ slowly enough that every pair is still tried infinitely often, the policies are *greedy in the limit with infinite exploration* (GLIE; Singh, Jaakkola, Littman and Szepesvári, 2000), and the fixed-point argument above then points to $\pi_\ast$ itself. Singh et al. proved convergence for the one-step TD analogue (Sarsa, [Chapter 05](05-temporal-difference.md)). The analogous statement for MC control is often stated without proof, for example in lecture notes. We are not aware of a general published proof for sample-average MC control with a changing policy; like MC ES, treat it as plausible but not established in general. Exercise 12 tries $\varepsilon_k = k_0/(k_0+k)$ on Blackjack, where $k_0$ is the episode at which $\varepsilon$ has halved.
 
+**GLIE is a per-state condition** ([Chapter 05](05-temporal-difference.md), Section 7.3): each state's exploration probabilities must sum to infinity over that state's *own* visits. An episode-indexed schedule such as $\varepsilon_k = k_0/(k_0+k)$ meets it in Blackjack only because every one of the 200 decision states can be reached directly from the deal (counting the automatic hits below 12), whatever the player does. Each state is therefore the first decision state of a game with a fixed, policy-independent probability, at least 0.046% (player A+A against a dealer ace, the rarest). It is visited in a positive fraction of episodes, so $\sum_k \varepsilon_k = \infty$ carries over to its own visits. In tasks where some states are reached only through exploratory moves, such as cliff walking (Chapter 05, Exercise 5.12), the same schedule is not guaranteed to be GLIE: such a state is visited with probability $O(\varepsilon_k)$ per episode, so its non-greedy actions are tried with probability $O(\varepsilon_k^2)$, a summable sequence for $\varepsilon_k \propto 1/k$, and once its greedy action settles they are tried only finitely often.
+
 ---
 
 ## 6. Off-policy prediction via importance sampling
@@ -545,7 +547,7 @@ $$
 
 **The unknown dynamics cancel.** The ratio depends only on the two policies, which we know. The same happens to reward probabilities if you write the trajectory with $p(s', r \mid s, a)$.
 
-**Proposition 6.1.** Assume coverage, and that both $\pi$ and $b$ terminate with probability 1 (the standing assumption of Section 1.2). Then $\mathbb{E}_b\left[\rho_{t:T-1} G_t \mid S_t = s\right] = v_\pi(s)$ and $\mathbb{E}_b\left[\rho_{t:T-1} \mid S_t = s\right] = 1$.
+**Proposition 4.4.** Assume coverage, and that both $\pi$ and $b$ terminate with probability 1 (the standing assumption of Section 1.2). Then $\mathbb{E}_b\left[\rho_{t:T-1} G_t \mid S_t = s\right] = v_\pi(s)$ and $\mathbb{E}_b\left[\rho_{t:T-1} \mid S_t = s\right] = 1$.
 
 *Proof.* Let $\tau$ range over the possible *finite* continuations of the trajectory from $s$, each ending in a terminal state, with probabilities $P_\pi(\tau)$ and $P_b(\tau)$. (In this chapter $\tau$ denotes a trajectory. It is not the temperature or Polyak coefficient that NOTATION.md assigns to $\tau$.) Because $b$ terminates with probability 1, these finite trajectories carry all of $b$'s probability, so $\mathbb{E}_b$ is a sum over them. By construction $\rho(\tau) = P_\pi(\tau)/P_b(\tau)$ whenever $P_b(\tau) > 0$. Coverage guarantees that $P_\pi(\tau) > 0 \Rightarrow P_b(\tau) > 0$, so
 
@@ -583,7 +585,7 @@ The true value is $-0.2772$. After episode 2, OIS claims the value is $4$, which
 
 ### 6.4 Bias and variance
 
-**Ordinary IS.** The first-visit OIS estimate is an average of i.i.d. terms $\rho_{t:T(t)-1} G_t$ whose mean is $v_\pi(s)$ by Proposition 6.1. So it is **unbiased** and consistent. Its variance per episode is
+**Ordinary IS.** The first-visit OIS estimate is an average of i.i.d. terms $\rho_{t:T(t)-1} G_t$ whose mean is $v_\pi(s)$ by Proposition 4.4. So it is **unbiased** and consistent. Its variance per episode is
 
 $$
 \mathrm{Var}_b\big[\rho\, G\big] = \mathbb{E}_b\big[\rho^2 G^2\big] - v_\pi(s)^2,
@@ -601,7 +603,7 @@ $$
 V^{\text{WIS}}_n(s) \;\longrightarrow\; \frac{\mathbb{E}_b[\rho\, G]}{\mathbb{E}_b[\rho]} = \frac{v_\pi(s)}{1} = v_\pi(s) \quad \text{with probability 1,}
 $$
 
-This uses Proposition 6.1 for both expectations.
+This uses Proposition 4.4 for both expectations.
 
 - *Bounded MSE even when the ratios have infinite variance.* If returns are bounded, $\min G \le V^{\text{WIS}} \le \max G$, and almost-sure convergence plus this bound gives MSE $\to 0$ by the bounded convergence theorem. No second moment of $\rho$ is needed (Section 6.6 is such a case).
 - *The convention matters early.* Until the first episode with $\rho > 0$ arrives, WIS has no data and reports its initial value. With a deterministic target policy that can take many episodes, and the convention shapes the early error curve (Section 6.5).
@@ -671,22 +673,22 @@ Weighted IS, by contrast, is **exactly 1 after the first $\pi$-consistent episod
 
 ## 7. Incremental implementation of weighted importance sampling
 
-Suppose we observe returns $G_1, G_2, \dots$ from a state, with weights $W_k \doteq \rho_{t_k:T(t_k)-1}$, and want the running WIS estimate
+Suppose we observe returns $G^{(1)}, G^{(2)}, \dots$ from a state, where, as in Section 2.4, the superscript counts returns: $G^{(k)} = G_{t_k}$ is the return from the $k$-th visit, made at time $t_k$ of its episode. The returns have weights $W_k \doteq \rho_{t_k:T(t_k)-1}$, and we want the running WIS estimate
 
 $$
-V_{n} \doteq \frac{\sum_{k=1}^{n-1} W_k G_k}{\sum_{k=1}^{n-1} W_k}, \qquad n \ge 2 .
+V_{n} \doteq \frac{\sum_{k=1}^{n-1} W_k G^{(k)}}{\sum_{k=1}^{n-1} W_k}, \qquad n \ge 2 .
 $$
 
 Keep the cumulative weight $C_n \doteq \sum_{k=1}^{n} W_k$, with $C_0 = 0$. Then
 
 $$
 \begin{aligned}
-V_{n+1} &= \frac{\sum_{k=1}^{n-1} W_k G_k + W_n G_n}{C_n} = \frac{C_{n-1} V_n + W_n G_n}{C_n} = \frac{(C_n - W_n)\, V_n + W_n G_n}{C_n} \\
-&= V_n + \frac{W_n}{C_n}\big[G_n - V_n\big],
+V_{n+1} &= \frac{\sum_{k=1}^{n-1} W_k G^{(k)} + W_n G^{(n)}}{C_n} = \frac{C_{n-1} V_n + W_n G^{(n)}}{C_n} = \frac{(C_n - W_n)\, V_n + W_n G^{(n)}}{C_n} \\
+&= V_n + \frac{W_n}{C_n}\big[G^{(n)} - V_n\big],
 \end{aligned}
 $$
 
-with $C_{n} = C_{n-1} + W_n$. This is again "estimate += step size × error", now with the data-dependent step size $W_n/C_n$. Two details matter. The initial value $V_1$ is irrelevant: if $n$ is the first index with $W_n > 0$, then $C_{n-1} = 0$ and $C_n = W_n$, so the step size $W_n/C_n = 1$ overwrites $V$ with $G_n$. And returns with $W_n = 0$ leave both $C$ and $V$ unchanged. They must be skipped rather than "updated" while $C$ is still 0, since the step size would be $0/0$.
+with $C_{n} = C_{n-1} + W_n$. This is again "estimate += step size × error", now with the data-dependent step size $W_n/C_n$. Two details matter. The initial value $V_1$ is irrelevant: if $n$ is the first index with $W_n > 0$, then $C_{n-1} = 0$ and $C_n = W_n$, so the step size $W_n/C_n = 1$ overwrites $V$ with $G^{(n)}$. And returns with $W_n = 0$ leave both $C$ and $V$ unchanged. They must be skipped rather than "updated" while $C$ is still 0, since the step size would be $0/0$.
 
 Putting the pieces together for state values, with both estimators side by side:
 
@@ -931,7 +933,7 @@ All results above come from the scripts in [`code/ch04_monte_carlo/`](../code/ch
 | [`compare_mc_control.py`](../code/ch04_monte_carlo/compare_mc_control.py) | 8 | The three control methods with the same budget |
 | [`per_decision_is.py`](../code/ch04_monte_carlo/per_decision_is.py) | 9 | Exact variances of ordinary, discounting-aware and per-decision IS |
 
-The core of first-visit MC prediction ([`mc_prediction_blackjack.py`](../code/ch04_monte_carlo/mc_prediction_blackjack.py), abridged) is a direct transcription of the pseudocode in Section 2.1:
+The core of first-visit MC prediction ([`mc_prediction_blackjack.py`](../code/ch04_monte_carlo/mc_prediction_blackjack.py), abridged) is a direct transcription of the pseudocode in Section 2.1. Here `env` is our own `Blackjack` simulator (Section 1.3), not a Gymnasium environment: `reset()` returns only the observation, and `step` returns `(obs, reward, done)`. A single `done` flag is safe only because Blackjack has no time limit, so `done` always means terminated. With a Gymnasium environment, use `obs, info = env.reset()`, the five-tuple `obs, reward, terminated, truncated, info = env.step(action)`, and the terminated/truncated rule of [Chapter 00](00-math-toolkit.md), Section 8.2; for MC, a truncated episode yields no complete return (see the pitfall on time limits below).
 
 ```python
         # 1. Generate an episode S0, A0, R1, ..., S_{T-1}, A_{T-1}, R_T following pi.
@@ -985,7 +987,7 @@ The same idea, run in reverse, gives a strong simulator test: `blackjack.py` fee
 - **A first-visit check that keeps the *last* visit.** A common bug in the backward pass is to keep a set of "already updated" states. That updates the *latest* occurrence and skips the earlier ones, which is the opposite of first-visit. The check must ask whether $S_t$ occurs at an *earlier* time $0..t-1$.
 - **"Every-visit MC is wrong."** It is biased but consistent, and on small samples it can have *lower* MSE than first-visit (42.75 vs 90 after one episode in Section 2.3). The two only differ when states recur within episodes.
 - **Exploring starts where you cannot choose the start.** ES needs the ability to start in any state–action pair. Gymnasium's `Blackjack-v1` cannot be reset to a chosen state, which is one reason we wrote our own simulator. A physical system almost never can be.
-- **Expecting fixed-$\varepsilon$ on-policy control to find $\pi_\ast$.** At best it settles at the best $\varepsilon$-soft policy (the fixed point of Section 5.3), whose greedy part can differ from $\pi_\ast$. Decaying $\varepsilon$ has its own traps. In Exercise 12, two GLIE schedules finished *worse* than a constant $\varepsilon$ after 5 million episodes.
+- **Expecting fixed-$\varepsilon$ on-policy control to find $\pi_\ast$.** At best it settles at the best $\varepsilon$-soft policy (the fixed point of Section 5.3), whose greedy part can differ from $\pi_\ast$. Decaying $\varepsilon$ has its own traps. In Exercise 12, two episode-indexed schedules (GLIE here, see Section 5.5) finished *worse* than a constant $\varepsilon$ after 5 million episodes. Nor is an episode-indexed decay automatically GLIE: GLIE is a per-state condition, which Blackjack meets only because every state can be reached from the deal.
 - **Including the ratio for $A_t$ when estimating $q(S_t, A_t)$.** The ratio for action values starts at $t+1$. In the backward loop, update $Q(S_t, A_t)$ *before* multiplying $W$ by $\pi(A_t \mid S_t)/b(A_t \mid S_t)$.
 - **Coverage violations and tiny behaviour probabilities.** If $b(a \mid s) = 0$ for an action $\pi$ may take, IS is silently biased. If $b(a \mid s)$ is tiny, the ratios explode. Logged data from a deterministic policy cannot evaluate a different policy without further assumptions ([Chapter 16](16-offline-rl-and-imitation.md)).
 - **Using the wrong behaviour probabilities.** The ratio needs $b(A_t \mid S_t)$ *as it was when the action was taken*. If $b$ is $\varepsilon$-greedy with respect to a $Q$ that has changed since, record the probabilities at acting time.
@@ -1068,7 +1070,7 @@ Every-visit: $V(A) = (3.25 + 3 + 1 + 0 - 2)/5 = 1.05$ and $V(B) = 1.0$.
 
 </details>
 
-**3. ★ Checking the ε-greedy improvement inequality.** A state has four actions with $q_\pi = (1, 2, 3, 0)$. The current policy is $\pi = (0.1, 0.6, 0.2, 0.1)$. (a) Is $\pi$ 0.2-soft? (b) Write down the 0.2-greedy policy $\pi'$ with respect to $q_\pi$. (c) Verify $\sum_a \pi'(a\mid s) q_\pi(s,a) \ge v_\pi(s)$, and compute the weights $w_a$ used in the proof of Theorem 5.1.
+**3. ★ Checking the ε-greedy improvement inequality.** A state has four actions with $q_\pi = (1, 2, 3, 0)$. The current policy is $\pi = (0.1, 0.6, 0.2, 0.1)$. (a) Is $\pi$ 0.2-soft? (b) Write down the 0.2-greedy policy $\pi'$ with respect to $q_\pi$. (c) Verify $\sum_a \pi'(a\mid s) q_\pi(s,a) \ge v_\pi(s)$, and compute the weights $w_a$ used in the proof of Theorem 4.3.
 
 <details><summary>Solution</summary>
 
@@ -1134,7 +1136,7 @@ $$
 \mathbb{E}_b[\rho_{t:T-1} \mid H_t] = \Pr_\pi\lbrace T < \infty \mid H_t\rbrace = 1 .
 $$
 
-The last equality is exactly where we use that $\pi$ terminates with probability 1. Without it, the identity says that $\mathbb{E}_b[\rho_{t:T-1} \mid H_t]$ equals $\pi$'s termination probability, which can be less than 1 (the remark after Proposition 6.1 gives an example with $\mathbb{E}_b[\rho] = 0$). By the Markov property the answer depends on $H_t$ only through $S_t$, which gives the statement conditioned on $S_t = s$.
+The last equality is exactly where we use that $\pi$ terminates with probability 1. Without it, the identity says that $\mathbb{E}_b[\rho_{t:T-1} \mid H_t]$ equals $\pi$'s termination probability, which can be less than 1 (the remark after Proposition 4.4 gives an example with $\mathbb{E}_b[\rho] = 0$). By the Markov property the answer depends on $H_t$ only through $S_t$, which gives the statement conditioned on $S_t = s$.
 
 Consistency: the pairs $(\rho^{(i)}G^{(i)}, \rho^{(i)})$ from different episodes are i.i.d. with finite means $v_\pi(s)$ and 1. By the strong law of large numbers, $\frac1n\sum\rho^{(i)}G^{(i)} \to v_\pi(s)$ and $\frac1n\sum\rho^{(i)} \to 1$ almost surely, so their ratio converges to $v_\pi(s)$. No second moments are needed.
 
@@ -1142,11 +1144,11 @@ MSE: $V^{\text{WIS}}_n$ is a convex combination of returns, so $\lvert V^{\text{
 
 </details>
 
-**6. ★★ Incremental weighted IS.** Derive $V_{n+1} = V_n + \frac{W_n}{C_n}(G_n - V_n)$ (Section 7). Explain why the initial value $V_1$ does not matter, and what goes wrong if you update with $W_n = 0$ while $C_n = 0$.
+**6. ★★ Incremental weighted IS.** Derive $V_{n+1} = V_n + \frac{W_n}{C_n}(G^{(n)} - V_n)$ (Section 7). Explain why the initial value $V_1$ does not matter, and what goes wrong if you update with $W_n = 0$ while $C_n = 0$.
 
 <details><summary>Solution</summary>
 
-The derivation is in Section 7: write $V_{n+1} = (C_{n-1}V_n + W_nG_n)/C_n$, then substitute $C_{n-1} = C_n - W_n$. For the first return with positive weight, $C$ goes from 0 to $W$, so the step size is $W/C = 1$ and $V$ becomes exactly $G$. The arbitrary initial value is overwritten. If a return has $W_n = 0$ while $C$ is still 0, the step size is $0/0$, which is undefined (NaN in floating point). That is why the pseudocode stops as soon as $W = 0$, and why WIS needs a convention ("0") until the first positive weight arrives.
+The derivation is in Section 7: write $V_{n+1} = (C_{n-1}V_n + W_nG^{(n)})/C_n$, then substitute $C_{n-1} = C_n - W_n$. For the first return with positive weight, $C$ goes from 0 to $W$, so the step size is $W/C = 1$ and $V$ becomes exactly $G$. The arbitrary initial value is overwritten. If a return has $W_n = 0$ while $C$ is still 0, the step size is $0/0$, which is undefined (NaN in floating point). That is why the pseudocode stops as soon as $W = 0$, and why WIS needs a convention ("0") until the first positive weight arrives.
 
 </details>
 
@@ -1197,7 +1199,7 @@ $$
 \mathbb{E}_b[\rho_{t:T-1}R_{t+k+1}] = \mathbb{E}_b\big[\rho_{t:t+k}R_{t+k+1}\;\mathbb{E}_b[\rho_{t+k+1:T-1}\mid H_{t+k+1}]\big] = \mathbb{E}_b[\rho_{t:t+k}R_{t+k+1}].
 $$
 
-The inner expectation is 1 by Exercise 5, applied from time $t+k+1$ instead of $t$: its truncation argument handles the random, unbounded $T$, and it uses that $\pi$ terminates with probability 1. Multiply by $\gamma^k$ and sum over $k$. Exchanging the infinite sum over $k$ with the expectation is justified because the terms are absolutely summable: with $\lvert R\rvert \le R_{\max}$, (A) of Exercise 5 gives $\mathbb{E}_b[\rho_{t:t+k}\lvert R_{t+k+1}\rvert] \le R_{\max}\Pr_\pi\lbrace T > t+k\rbrace$, whose sum over $k$ is $R_{\max}\,\mathbb{E}_\pi[T - t] < \infty$ (episode lengths have geometric tails in a finite MDP, Section 2.3). Then $\mathbb{E}_b[\tilde G_t] = \mathbb{E}_b[\rho_{t:T-1}G_t] = v_\pi(s)$ by Proposition 6.1. All expectations are conditional on $S_t = s$.
+The inner expectation is 1 by Exercise 5, applied from time $t+k+1$ instead of $t$: its truncation argument handles the random, unbounded $T$, and it uses that $\pi$ terminates with probability 1. Multiply by $\gamma^k$ and sum over $k$. Exchanging the infinite sum over $k$ with the expectation is justified because the terms are absolutely summable: with $\lvert R\rvert \le R_{\max}$, (A) of Exercise 5 gives $\mathbb{E}_b[\rho_{t:t+k}\lvert R_{t+k+1}\rvert] \le R_{\max}\Pr_\pi\lbrace T > t+k\rbrace$, whose sum over $k$ is $R_{\max}\,\mathbb{E}_\pi[T - t] < \infty$ (episode lengths have geometric tails in a finite MDP, Section 2.3). Then $\mathbb{E}_b[\tilde G_t] = \mathbb{E}_b[\rho_{t:T-1}G_t] = v_\pi(s)$ by Proposition 4.4. All expectations are conditional on $S_t = s$.
 
 </details>
 
@@ -1243,7 +1245,7 @@ print(updates_start / M, 2 ** -N, Q[0][CONT])
 
 </details>
 
-**12. ★★★ Decaying ε (GLIE) on Blackjack.** Run on-policy MC control with $\varepsilon_k = k_0/(k_0+k)$ in episode $k$, for $k_0 = 10^4$ and $k_0 = 2\times 10^5$, with 5 million episodes and seeds 0–2 (`python code/ch04_monte_carlo/on_policy_mc_control.py --glie 10000`, about 50 s). Compare the exact value of the final greedy policy with the constant-$\varepsilon = 0.1$ run of Section 5.5, and explain the result.
+**12. ★★★ Decaying ε on Blackjack (an episode-indexed schedule, GLIE here).** Run on-policy MC control with $\varepsilon_k = k_0/(k_0+k)$ in episode $k$, for $k_0 = 10^4$ and $k_0 = 2\times 10^5$, with 5 million episodes and seeds 0–2 (`python code/ch04_monte_carlo/on_policy_mc_control.py --glie 10000`, about 50 s). Compare the exact value of the final greedy policy with the constant-$\varepsilon = 0.1$ run of Section 5.5, and explain the result.
 
 <details><summary>Solution</summary>
 
@@ -1255,7 +1257,7 @@ Our runs (exact $J$ of the final greedy policy; $J^\ast = -0.04311$):
 | $k_0 = 10^4$ | 0.002 | $-0.04753 / -0.04749 / -0.04837$ | 10 / 11 / 12 |
 | $k_0 = 2\times10^5$ | 0.038 | $-0.04680 / -0.04686 / -0.04730$ | 9 / 10 / 10 |
 
-Both GLIE schedules did **worse** than a constant $\varepsilon$ after 5 million episodes. The errors are systematic. With $k_0 = 2\times 10^5$, all 29 wrong decisions across the three seeds are *stick where hitting is optimal*. With $k_0 = 10^4$, 29 of 33 are. That consistent direction points to two effects. We did not isolate them in separate experiments.
+Both episode-indexed schedules (GLIE here, because every Blackjack state can be reached from the deal; see Section 5.5) did **worse** than a constant $\varepsilon$ after 5 million episodes. The errors are systematic. With $k_0 = 2\times 10^5$, all 29 wrong decisions across the three seeds are *stick where hitting is optimal*. With $k_0 = 10^4$, 29 of 33 are. That consistent direction points to two effects. We did not isolate them in separate experiments.
 
 1. **Sample averages remember old policies.** $Q$ averages every return since the start with weight $1/N$. Early episodes are played with $\varepsilon \approx 1$, so after a *hit* the rest of the hand is played almost at random, which is bad. Those returns make hitting look worse than it is, and the $1/N$ average never forgets them. Sticking ends the game immediately, so its returns are not contaminated in the same way. That is why the bias always favours sticking.
 2. **Too-fast decay starves exploration.** With $k_0 = 10^4$, $\varepsilon$ is below 0.01 after a million episodes. Some non-greedy actions then end up with only a few dozen samples in total. For example, hitting on soft 17 against a dealer 4 was tried only 44 times in seed 0, even though its exact advantage over sticking is $0.14$.

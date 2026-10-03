@@ -288,7 +288,7 @@ Our gridworld results for $n$-step SARSA appear alongside SARSA(λ) in Section 1
 
 ### 4.1 Why one-step methods were off-policy for free and n-step methods are not
 
-One-step Q-learning and Expected SARSA need no importance sampling ([Chapter 05](05-temporal-difference.md), Section 8.2). Their target $R_{t+1} + \gamma\sum_a \pi(a\mid S_{t+1})Q(S_{t+1},a)$ conditions on $(S_t, A_t)$, and nothing after that depends on the behaviour policy $b$. An $n$-step target is different. The rewards $R_{t+2}, \ldots, R_{t+n}$ and the bootstrap state $S_{t+n}$ depend on the actions $A_{t+1}, \ldots, A_{t+n-1}$, and those were chosen by $b$. To estimate values for the target policy $\pi$, we must correct for this, most directly by reweighting with the importance-sampling ratio of [Chapter 04](04-monte-carlo.md) (Sections 5–7 give alternatives):
+One-step Q-learning and Expected SARSA need no importance sampling ([Chapter 05](05-temporal-difference.md), Section 8.2). Their target $R_{t+1} + \gamma\sum_a \pi(a\mid S_{t+1})Q(S_{t+1},a)$ conditions on $(S_t, A_t)$, and nothing after that depends on the behaviour policy $b$. An $n$-step target is different. The rewards $R_{t+2}, \ldots, R_{t+n}$ and the bootstrap state $S_{t+n}$ depend on the actions $A_{t+1}, \ldots, A_{t+n-1}$, and those were chosen by $b$. To estimate values for the target policy $\pi$, we must correct for this, most directly by reweighting with the importance-sampling ratio of [Chapter 04](04-monte-carlo.md) (Sections 5–7 of this chapter give alternatives):
 
 $$
 \rho_{t:h} \doteq \prod_{k=t}^{\min(h,\,T-1)}\frac{\pi(A_k\mid S_k)}{b(A_k\mid S_k)},

@@ -15,11 +15,11 @@ If one idea is "central and novel" to reinforcement learning, Sutton and Barto a
 - implement SARSA, Q-learning, Expected SARSA and Double Q-learning from scratch and say *exactly* why Q-learning and Expected SARSA need no importance sampling;
 - explain the gap between **online performance** and **learned policy** (cliff walking), **maximization bias** and its cure, and **afterstates**;
 - write a correct Gymnasium training loop that bootstraps through *truncation* but not through *termination*;
-- relate the TD error to the reward-prediction-error account of dopamine.
+- relate the TD error to the reward-prediction-error account of dopamine, derive blocking from the Rescorla–Wagner rule, and explain what the TD model of conditioning and the two-step task say about model-free versus model-based control.
 
 **Prerequisites.** Markov decision processes, returns and Bellman equations ([Chapter 01](01-the-rl-problem.md)); policy evaluation, value iteration, generalized policy iteration (GPI) and the contraction property of Bellman operators ([Chapter 03](03-dynamic-programming.md)); constant-$\alpha$ Monte Carlo, $\varepsilon$-soft policies and importance sampling ([Chapter 04](04-monte-carlo.md)); $\varepsilon$-greedy exploration and incremental averaging ([Chapter 02](02-multi-armed-bandits.md)); conditional expectation and the Robbins–Monro conditions ([Chapter 00](00-math-toolkit.md)). The few further probability tools used in the convergence proofs (filtrations, martingale-difference noise, the Borel–Cantelli lemmas) are stated in a toolbox in Section 5.1.
 
-**Code you will run.** Eight scripts in [`code/ch05_temporal_difference/`](../code/ch05_temporal_difference/): TD(0) vs Monte Carlo on the random walk, batch TD vs batch MC, cliff walking (plus a step-size sweep), maximization bias and Double Q-learning, Q-learning on Gymnasium's Taxi-v4, Robbins–Monro step sizes for Q-learning, and the coding-exercise solutions. Each runs in seconds to about two minutes on one CPU core; the table in [In code](#in-code) lists them with runtimes and headline results.
+**Code you will run.** Nine scripts in [`code/ch05_temporal_difference/`](../code/ch05_temporal_difference/): TD(0) vs Monte Carlo on the random walk, batch TD vs batch MC, cliff walking (plus a step-size sweep), maximization bias and Double Q-learning, Q-learning on Gymnasium's Taxi-v4, Robbins–Monro step sizes for Q-learning, classical conditioning and the two-step task, and the coding-exercise solutions. Each runs in seconds to about two minutes on one CPU core; the table in [In code](#in-code) lists them with runtimes and headline results.
 
 **Study time.** About 6–8 hours for the text and derivations, plus 2–4 hours for the code and exercises.
 
@@ -317,7 +317,7 @@ The same comparison on the random walk (S&B Figure 6.2): after each new episode,
 
 | episodes in batch | 1 | 5 | 10 | 25 | 50 | 100 |
 |---|---|---|---|---|---|---|
-| batch TD(0) RMS | 0.396 | 0.188 | 0.125 | 0.074 | 0.052 | 0.039 |
+| batch TD(0) RMS | 0.396 | 0.188 | 0.125 | 0.074 | 0.051 | 0.039 |
 | batch MC RMS | 0.396 | 0.255 | 0.175 | 0.111 | 0.076 | 0.056 |
 
 With one episode the two coincide: every visited state has the same return, and states not yet visited keep their initial 0.5. From two episodes on, batch TD is lower at every one of the 99 batch sizes. Since the random walk *is* a Markov process, the maximum-likelihood model is the right thing to believe. If the Markov assumption is badly violated (for instance, if we merged several states into one observation), the certainty-equivalence estimate can be worse than MC's (Exercise 5.14 and [Chapter 15](15-beyond-mdps.md)).
@@ -669,7 +669,7 @@ What did they *learn*? After training we followed the greedy policy $\arg\max_a 
 | Expected SARSA | 100 / 100 | −15.0 | row 1 in all 100 runs |
 | SARSA | 84 / 100 | −17.1 (mean over the 84) | row 0 (farthest from the cliff) in 80 runs, row 1 in 3, row 2 in 1 |
 
-What should SARSA and Expected SARSA learn here? With $\varepsilon = 0.1$ held fixed, both evaluate the $\varepsilon$-greedy policy they follow, and they share one fixed point: the $Q$ that satisfies $Q(s,a) = r + \sum_{a'} \pi_\varepsilon(a' \mid s')\, Q(s',a')$, where $\pi_\varepsilon$ is $\varepsilon$-greedy with respect to that same $Q$. (Expected SARSA's expected update is exactly this backup, and SARSA's target has the same conditional mean, Section 9.) Its solution gives the action values of the **best $\varepsilon$-greedy policy**. `cliff_walking.py` computes it exactly by "$\varepsilon$-soft value iteration", using the known model for analysis only:
+What should SARSA and Expected SARSA learn here? With $\varepsilon = 0.1$ held fixed, both evaluate the $\varepsilon$-greedy policy they follow, and they share one fixed point: the $Q$ that satisfies $Q(s,a) = r + \sum_{a'} \pi_\varepsilon(a' \mid s')\, Q(s',a')$, where $\pi_\varepsilon$ is $\varepsilon$-greedy with respect to that same $Q$. (Expected SARSA's expected update is exactly this backup, and SARSA's target has the same conditional mean, Section 9.) Its solution gives the action values of the best $\varepsilon$-soft policy of [Chapter 04](04-monte-carlo.md), Section 5.3, the optimal policy of the modified environment that overrides the agent's choice with probability $\varepsilon$. That policy is itself $\varepsilon$-greedy, so we call it the **best $\varepsilon$-greedy policy** below. `cliff_walking.py` computes it exactly by "$\varepsilon$-soft value iteration" (value iteration in that modified environment), using the known model for analysis only:
 
 | policy (all executed $\varepsilon$-greedily, $\varepsilon = 0.1$) | exact expected return from S |
 |---|---|
@@ -960,13 +960,78 @@ The bug flips the learned policy. A committed "stayer" under the bug sees nine t
 
 ## 14. TD learning in the brain
 
+TD learning has roots in animal-learning psychology and describes a signal the brain computes. The simulations of this section are in [`conditioning_td.py`](../code/ch05_temporal_difference/conditioning_td.py) (about 2 seconds).
+
+### 14.1 Dopamine neurons signal a reward-prediction error
+
 In the 1990s it was discovered that the TD error is not only an engineering device; it seems to be computed by the brain. Schultz and colleagues recorded midbrain dopamine neurons in monkeys learning that a cue (a light or tone) predicts juice. Three observations stand out (Schultz, Dayan and Montague, 1997):
 
 1. **Before learning,** the neurons burst when the unexpected juice arrives: a positive prediction error, $\delta > 0$ at the reward.
 2. **After learning,** the burst moves to the *cue*, the earliest reliable predictor of reward. The juice itself, now fully predicted, no longer causes a response: $\delta \approx 0$ at the reward because $V$ (cue state) already anticipates it.
 3. **If the predicted juice is omitted,** activity *dips* below baseline at exactly the time the reward was expected: $\delta < 0$.
 
-This is the signature of $\delta_t = R_{t+1} + \gamma V(S_{t+1}) - V(S_t)$ in a TD model whose states encode time since the cue, as Montague, Dayan and Sejnowski (1996) had proposed. The **reward-prediction-error hypothesis of dopamine** has become one of the most successful bridges between computational theory and neuroscience (Glimcher, 2011, gives an accessible review). It is a hypothesis, not a settled fact: dopamine also responds to novelty and salience, and later work suggests that different dopamine neurons may encode a *distribution* of prediction errors, like distributional RL agents (Dabney et al., 2020). Sutton and Barto devote their Chapter 15 to this connection.
+This is the signature of $\delta_t = R_{t+1} + \gamma V(S_{t+1}) - V(S_t)$ in a TD model whose states encode time since the cue, as Montague, Dayan and Sejnowski (1996) had proposed; Section 14.2 builds such a model. The **reward-prediction-error hypothesis of dopamine** has become one of the most successful bridges between computational theory and neuroscience (Glimcher, 2011, gives an accessible review). It is a hypothesis, not a settled fact: dopamine also responds to novelty and salience, and later work suggests that different dopamine neurons may encode a *distribution* of prediction errors, like distributional RL agents (Dabney et al., 2020). Sutton and Barto devote two chapters to these connections, Chapter 14 (psychology) and Chapter 15 (neuroscience).
+
+### 14.2 Classical conditioning: Rescorla–Wagner and the TD model
+
+In **classical (Pavlovian) conditioning** (Pavlov, 1927), a neutral *conditioned stimulus* (CS, such as a tone) is repeatedly followed by an *unconditioned stimulus* (US, such as food), and the animal comes to respond to the CS as if it anticipated the US. Nothing the animal does changes what happens: this is a prediction problem.
+
+The **Rescorla–Wagner model** (Rescorla and Wagner, 1972) gives each CS $i$ an associative strength $w_i$. On a trial on which the set $\mathcal{P}$ of stimuli is present and the US has magnitude $R$ ($R = 0$ if it is omitted),
+
+$$
+w_i \leftarrow w_i + \alpha_i\Big(R - \sum_{j \in \mathcal{P}} w_j\Big) \qquad \text{for every } i \in \mathcal{P}. \tag{5.20}
+$$
+
+(Rescorla and Wagner wrote $\lambda$ for $R$, a symbol we keep for the trace parameter of [Chapter 06](06-n-step-and-eligibility-traces.md).) With a binary vector $\mathbf{x}$ marking the stimuli present and equal step sizes, (5.20) is $\mathbf{w} \leftarrow \mathbf{w} + \alpha(R - \mathbf{w}^\top\mathbf{x})\,\mathbf{x}$, the least-mean-squares rule of Widrow and Hoff (1960): gradient Monte Carlo ([Chapter 08](08-function-approximation.md)) with the US as the target.
+
+Because **all the stimuli present share one error**, the model explains **blocking** (Kamin, 1969). Train A → US until $w_A \approx R$, then train the compound AX → US. The error $R - w_A - w_X$ is already near zero, so X learns almost nothing, although it is paired with the US as often as in a control group whose first phase used an unrelated stimulus B (there A and X split the error, $R/2$ each). `conditioning_td.py` gives $w_X = 0.000$ after blocking against $0.500$ in the control group (200 + 100 trials, $\alpha = 0.1$; Exercise 5.15). Pairing is not enough for learning; the US must be *surprising*.
+
+Rescorla–Wagner works with whole trials, so it cannot say *when* the US is expected, nor produce **second-order conditioning**: a stimulus B followed by a trained A, never by the US, coming to predict the US (Exercise 5.16).
+
+The **TD model of classical conditioning** (Sutton and Barto, 1987, 1990) runs TD(0) in real time inside the trial, with a linear value $V_t = \mathbf{w}^\top\mathbf{x}_t$. In the **complete serial compound** (CSC) representation each stimulus has one feature per time step since its onset: $x_{i,k}(t) = 1$ if stimulus $i$ came on $k$ steps ago and is still present. Steps with no stimulus have $\mathbf{x}_t = \mathbf{0}$. The update is linear TD(0):
+
+$$
+\delta_t = R_{t+1} + \gamma\,\mathbf{w}^\top\mathbf{x}_{t+1} - \mathbf{w}^\top\mathbf{x}_t, \qquad \mathbf{w} \leftarrow \mathbf{w} + \alpha\,\delta_t\,\mathbf{x}_t. \tag{5.21}
+$$
+
+A trial with a single time step ($\mathbf{x}_{t+1} = \mathbf{0}$) gives back Rescorla–Wagner, so the TD model inherits blocking: in our simulation X ends with value 0.000, against 0.387 in the control group (half of a trained CS's 0.774). It also adds timing. Below, a CS comes on at step 6 and the US arrives 6 steps later ($\gamma = 0.95$, $\alpha = 0.1$):
+
+![TD errors over conditioning trials, blocking, and second-order conditioning](../code/ch05_temporal_difference/figures/conditioning_td.png)
+
+On trial 1, $\delta = 1$ when the US arrives and 0 elsewhere. After 200 trials, $\delta = 0.735 = \gamma^6$ at the cue and $0.000$ at the US. Withholding the US once then gives $\delta = -1.000$ exactly at the step at which it was due: the CSC lets the model learn *when* reward is expected. These are the three observations of Section 14.1.
+
+With TD(0) and a CSC the error travels backwards one feature at a time (the bumps on trials 10 and 30); the cue response reached 90% of its final size only on trial 92. Whether dopamine does this is debated: Pan, Schmidt, Wickens and Hyland (2005) saw cue responses appear at their final latency while reward responses persisted, which a TD($\lambda$) model with long eligibility traces ([Chapter 06](06-n-step-and-eligibility-traces.md)) reproduced, while Amo et al. (2022) found a gradual backward shift in mice. The CSC is itself an idealisation (Ludvig, Sutton and Kehoe, 2008, replace it with "microstimuli").
+
+### 14.3 Habits and goals: model-free versus model-based control
+
+In **instrumental** conditioning, actions matter. Thorndike's *law of effect* (1911; [Chapter 01](01-the-rl-problem.md)) is trial-and-error learning in a sentence, and Skinner's **shaping**, rewarding successive approximations to a target behaviour (Peterson, 2004), is the ancestor of reward shaping ([Chapter 20](20-deep-rl-in-practice.md), Section 2.3).
+
+Is an action chosen for what it leads to, or because it was reinforced? **Outcome devaluation** tells. Rats learn to press a lever for a food; the food is then devalued away from the lever, for example by pairing it with illness; finally the lever is tested *in extinction*, with no food, so no new prediction error about pressing can arise. After moderate training, rats whose food had been devalued pressed less than controls (Adams and Dickinson, 1981): their choice consulted the outcome's current value, so it was **goal-directed**. After extended training, devaluation had little effect (Adams, 1982): the response had become a **habit**.
+
+This is the distinction between **model-based** control, which plans with a model of what actions lead to and of what outcomes are now worth ([Chapter 07](07-planning-and-learning-tabular.md)) and adapts to devaluation at once, and **model-free** control, which acts on cached values like every method in this chapter. A cached $Q(s, \text{press})$ changes only through a prediction error about pressing, which an extinction test never provides. Daw, Niv and Dayan (2005) proposed that the brain arbitrates between them by uncertainty: planning uses information efficiently but is noisy when the search is approximate, cached values are cheap but slow to absorb new information, so control passes to habits as training accumulates.
+
+The **two-step task** (Daw, Gershman, Seymour, Dayan and Dolan, 2011) separates the two in humans. A first-stage choice leads to one of two second-stage states, with probability 0.7 to one ("common") and 0.3 to the other ("rare"); there a second choice pays off with a slowly drifting probability. After a reward that followed a *rare* transition, a model-free learner repeats its first-stage action, while a model-based learner switches, because the *other* action is the likely route to the state just rewarded. `conditioning_td.py` simulates 2,000 agents of each kind for 201 trials ($\alpha = 0.5$, softmax inverse temperature 5). The model-free agent uses TD with an eligibility trace $\lambda = 1$, so its first-stage value moves towards the reward itself; the model-based agent computes $Q_{\text{MB}}(a) = \sum_{s} P(s \mid a)\max_b Q_2(s,b)$ from the known transition probabilities; the hybrid uses $\tfrac12 Q_{\text{MB}} + \tfrac12 Q_{\text{MF}}$.
+
+![Stay probabilities in the two-step task](../code/ch05_temporal_difference/figures/two_step_task.png)
+
+| agent | rewarded, common | rewarded, rare | unrewarded, common | unrewarded, rare | reward effect | reward × transition |
+|---|---|---|---|---|---|---|
+| model-free | 0.908 | 0.904 | 0.567 | 0.582 | +0.331 | +0.019 |
+| model-based | 0.654 | 0.441 | 0.446 | 0.652 | −0.001 | +0.420 |
+| hybrid | 0.783 | 0.702 | 0.451 | 0.554 | +0.240 | +0.184 |
+
+Entries are probabilities of repeating the previous first-stage choice (between-agent standard errors at most 0.0022). The reward effect averages the two rewarded − unrewarded differences; the interaction is the difference between them. Model-free choice shows essentially only a reward effect (its small interaction, +0.015 to +0.019 over four seeds, comes from correlations between the outcome cells and the agent's existing preferences); model-based choice shows only the interaction. Daw et al.'s participants showed both, like the hybrid, and their striatal prediction errors mixed both kinds of prediction. Dyna ([Chapter 07](07-planning-and-learning-tabular.md)) is one architecture in which the two coexist.
+
+### 14.4 Beyond phasic dopamine
+
+- **Actor and critic in the striatum.** Prediction-error activity appeared in the ventral striatum in both Pavlovian and instrumental tasks, but in the dorsal striatum only when actions had to be chosen (O'Doherty et al., 2004): a critic and an actor ([Chapter 10](10-policy-gradients.md), Section 7.3).
+- **Tonic dopamine and average reward.** Slowly varying dopamine may report the average reward rate, the opportunity cost of time, and so set response vigour (Niv, Daw, Joel and Dayan, 2007; the average-reward setting of [Chapter 08](08-function-approximation.md), Section 12).
+- **Distributional dopamine.** Neurons differ in how they scale positive versus negative errors, as distributional RL agents do (Dabney et al., 2020; [Chapter 09](09-deep-q-learning.md), Section 9).
+- **The hippocampus as a predictive map.** Place-cell activity resembles the successor representation (Stachenfeld, Botvinick and Gershman, 2017; [Chapter 15](15-beyond-mdps.md), Section 6.1).
+- **Replay as prioritized backups.** Which memories the hippocampus replays is predicted by the value of the corresponding backups (Mattar and Daw, 2018), close to prioritized sweeping ([Chapter 07](07-planning-and-learning-tabular.md), Section 5).
+- **Prefrontal cortex as a meta-learner.** Dopamine-driven RL may train recurrent prefrontal dynamics that implement a fast learning algorithm themselves (Wang et al., 2018), as in RL² ([Chapter 15](15-beyond-mdps.md), Section 7.3).
+
+Niv (2009) reviews this area for readers who know RL.
 
 ---
 
@@ -978,11 +1043,12 @@ All scripts run from the repository root, take `--quick` (a smoke test of at mos
 |---|---|---|---|
 | [`random_walk_td_vs_mc.py`](../code/ch05_temporal_difference/random_walk_td_vs_mc.py) | TD(0) vs constant-$\alpha$ MC (Sections 2–3); the dip (Exercise 5.9) | 0.6 s / 9 s | best RMS after 100 episodes: TD 0.035 vs MC 0.082 |
 | [`batch_td_vs_mc.py`](../code/ch05_temporal_difference/batch_td_vs_mc.py) | batch updating, certainty equivalence (Section 4) | 0.8 s / 43 s | predictor: TD $V(A) = 0.75$, MC $V(A) = 0$; batch TD lower RMS at 99/99 batch sizes |
-| [`cliff_walking.py`](../code/ch05_temporal_difference/cliff_walking.py) | SARSA vs Q-learning vs Expected SARSA; exact $\varepsilon$-soft fixed point; SARSA's route vs $\alpha$ (Section 10) | 0.5 s / 22 s | online (last 100 ep.): −27.8 / −51.1 / −21.1; best $\varepsilon$-greedy policy: row 1, −20.71; SARSA reaches row 1 in 18/20 seeds at $\alpha = 0.05$ |
+| [`cliff_walking.py`](../code/ch05_temporal_difference/cliff_walking.py) | SARSA vs Q-learning vs Expected SARSA; exact fixed point by $\varepsilon$-soft value iteration; SARSA's route vs $\alpha$ (Section 10) | 0.5 s / 22 s | online (last 100 ep.): −27.8 / −51.1 / −21.1; best $\varepsilon$-greedy policy: row 1, −20.71; SARSA reaches row 1 in 18/20 seeds at $\alpha = 0.05$ |
 | [`cliff_alpha_sweep.py`](../code/ch05_temporal_difference/cliff_alpha_sweep.py) | step-size sensitivity (Section 10.3) | 0.7 s / 34 s | Expected SARSA best at all $\alpha$; SARSA collapses at $\alpha = 1$ |
 | [`maximization_bias.py`](../code/ch05_temporal_difference/maximization_bias.py) | maximization bias, Double Q-learning, update counts; 20,000-episode runs under four behaviour policies (Section 11) | 2 s / 110 s | peak % left: Q-learning 94.0%, Double Q 50.9% (= initial tie); $Q(A,\text{left})$ at 20,000 episodes: −0.132 vs −0.336 with ε-greedy behaviour, +0.257 vs −0.102 with uniform behaviour (true −0.1) |
 | [`taxi_q_learning.py`](../code/ch05_temporal_difference/taxi_q_learning.py) | Gymnasium loop, terminated vs truncated; behaviour vs greedy curves (Section 13) | 8 s / 52 s | greedy return 7.93 (optimal); truncation bug flips stay-or-quit policy |
 | [`q_learning_step_sizes.py`](../code/ch05_temporal_difference/q_learning_step_sizes.py) | Robbins–Monro conditions (Section 8.4) | 3 s / 65 s | $\lVert Q - q_\ast\rVert_\infty$ at $4\times10^5$ steps: $1/n^{0.6}$: 0.10, $1/n$: 1.53, const 0.1: 0.82 |
+| [`conditioning_td.py`](../code/ch05_temporal_difference/conditioning_td.py) | Rescorla–Wagner vs the CSC TD model: blocking, dopamine-like errors, second-order conditioning; two-step task (Section 14) | 0.2 s / 2 s | blocked $w_X$ 0.000 vs control 0.500; $\delta$ at cue $0.735 = \gamma^6$, $-1$ on omission; stay-probability interaction MF +0.019, MB +0.420 |
 | [`exercise_solutions.py`](../code/ch05_temporal_difference/exercise_solutions.py) | Exercises 5.12 and 5.13 | 9 s / 142 s | see the solutions |
 
 Four implementation patterns recur and are worth copying.
@@ -1037,7 +1103,7 @@ while True:
 4. **Deterministic argmax tie-breaking.** With zero-initialised $Q$, `np.argmax` always returns action 0. This can stall exploration and bias results. Break ties randomly.
 5. **"The TD target is unbiased."** It is unbiased for $(\mathcal{T}^\pi V)(S_t)$, not for $v_\pi(S_t)$ (equation 5.9). TD converges *despite* this bias, in the tabular case.
 6. **Expecting convergence with a constant step size.** With noisy targets (stochastic rewards or transitions, or a sampled next action as in SARSA), a constant $\alpha$ gives tracking and a noise floor, not convergence (Section 8.4). With deterministic dynamics and expected targets (Q-learning, Expected SARSA) it is just a relaxed Bellman backup and does converge (Section 10.3, Exercise 5.13). Conversely, $\alpha = 1/n$ satisfies Robbins–Monro but can be extremely slow for bootstrapped targets. Polynomial rates $1/n^{\omega}$, $\omega \in (1/2, 1)$, are a better default when you need decay.
-7. **"Off-policy Q-learning needs importance sampling."** One-step Q-learning and Expected SARSA do not (Section 8.2). Multi-step off-policy methods do ([Chapter 06](06-n-step-and-eligibility-traces.md)). And "off-policy for free" is a tabular statement: with function approximation, off-policy bootstrapping can diverge ([Chapter 08](08-function-approximation.md)).
+7. **"Off-policy Q-learning needs importance sampling."** One-step Q-learning and Expected SARSA do not (Section 8.2). Multi-step off-policy methods must correct for the intermediate actions that $b$ chose: with importance sampling, or with ratio-free corrections such as Tree Backup and Watkins's trace cutting ([Chapter 06](06-n-step-and-eligibility-traces.md), Sections 4–6 and 13). And "off-policy for free" is a tabular statement: with function approximation, off-policy bootstrapping can diverge ([Chapter 08](08-function-approximation.md)).
 8. **Thinking maximization bias is a Q-learning problem only, or that Double Q-learning makes estimates unbiased.** Any method whose target evaluates an action selected by the same noisy estimates is affected, including SARSA and Expected SARSA with $\varepsilon$-greedy policies (Section 11.4). Conversely, Double Q-learning removes the bias of the max, not every bias: with $\varepsilon$-greedy behaviour and a constant step size it ended well below the true value on Example 6.7 (Section 11.5).
 9. **Confusing behaviour performance with greedy performance.** On Taxi, the $\varepsilon$-greedy return plateaued around 2.45 while the greedy policy was optimal at 7.93. Always say which one you report.
 10. **Reading a greedy policy off a noisy $Q$.** With large constant $\alpha$ the estimates of near-equal actions fluctuate, and the greedy read-out can be absurd (SARSA's greedy read-out got stuck in a loop in 16 of 100 cliff runs: 9 wall bumps and 7 two-cell oscillations) even when the behaviour is fine.
@@ -1056,7 +1122,8 @@ while True:
 - **Overestimation and Double Q-learning.** Thrun and Schwartz (1993) identified systematic overestimation in Q-learning with function approximation. Smith and Winkler (2006) analysed the "optimizer's curse" in decision analysis. Van Hasselt (2010, NeurIPS) proposed Double Q-learning; van Hasselt, Guez and Silver (2016, AAAI) carried it to deep RL as Double DQN.
 - **Learning rates.** Robbins and Monro (1951) introduced stochastic approximation. Szepesvári (1997, NeurIPS) analysed the asymptotic rate of Q-learning; Even-Dar and Mansour (2003, JMLR) showed the advantage of polynomial over linear learning rates.
 - **Applications.** Tesauro's TD-Gammon (Tesauro, 1995, Communications of the ACM) learned backgammon at near world-champion level with TD($\lambda$) and a neural network. It remains the classic demonstration that TD self-play can work.
-- **Neuroscience.** Montague, Dayan and Sejnowski (1996, Journal of Neuroscience) proposed that dopamine signals a TD error. Schultz, Dayan and Montague (1997, Science 275:1593–1599) presented the neural recordings and the TD interpretation side by side.
+- **Psychology.** Rescorla and Wagner (1972, in *Classical Conditioning II*) explained Kamin's (1969) blocking with a shared prediction error. Sutton and Barto's TD model of classical conditioning (1987, Cognitive Science Society; 1990, in *Learning and Computational Neuroscience*) introduced the complete serial compound. Adams and Dickinson (1981) and Adams (1982) separated goal-directed actions from habits by outcome devaluation.
+- **Neuroscience.** Montague, Dayan and Sejnowski (1996, Journal of Neuroscience) proposed that dopamine signals a TD error. Schultz, Dayan and Montague (1997, Science 275:1593–1599) presented the neural recordings and the TD interpretation side by side. Daw, Niv and Dayan (2005, Nature Neuroscience) proposed uncertainty-based arbitration between model-based and model-free controllers, and Daw, Gershman, Seymour, Dayan and Dolan (2011, Neuron) introduced the two-step task.
 - **Time limits.** Pardo, Tavakoli, Levdik and Kormushev (2018, ICML) analysed time limits in RL and introduced partial-episode bootstrapping.
 - **Textbook.** Sutton and Barto (2018), Chapter 6, is the primary source for the examples in this chapter (random walk, "you are the predictor", cliff walking, the maximization-bias MDP, afterstates).
 
@@ -1075,6 +1142,8 @@ while True:
 - **Afterstates** exploit known deterministic parts of the dynamics to share values across state–action pairs.
 - In Gymnasium, **bootstrap through truncation, never through termination**. The bug was harmless on Taxi but flipped the optimal policy in a simple time-limited task.
 - The TD error closely matches the phasic firing of **dopamine** neurons, the reward-prediction-error hypothesis.
+- The **Rescorla–Wagner** rule is the LMS rule with one error shared by all stimuli present, which explains **blocking**. The **TD model of conditioning** is the multi-step generalization: with a complete serial compound it adds timing (the error moves from US to cue, and dips at an omitted US) and second-order conditioning.
+- Goal-directed actions and **habits** (outcome devaluation) correspond to **model-based** and **model-free** control. In the two-step task, model-free agents show a main effect of reward on repeating a choice and model-based agents a reward × transition interaction; humans show both.
 
 ## Key equations
 
@@ -1095,6 +1164,8 @@ while True:
 | Double estimator (5.17) | $\mathbb{E}[Q_2(\arg\max_a Q_1(a))] = \mathbb{E}[q(A^\ast)] \le \max_a q(a)$ |
 | Double Q-learning | $Q_1(S_t,A_t) \leftarrow Q_1(S_t,A_t) + \alpha[R_{t+1} + \gamma Q_2(S_{t+1}, \arg\max_a Q_1(S_{t+1},a)) - Q_1(S_t,A_t)]$ |
 | Afterstate update (5.19) | $U(Y_t) \leftarrow U(Y_t) + \alpha[R_{t+1} + \gamma\max_{a'}U(f(S_{t+1},a')) - U(Y_t)]$ |
+| Rescorla–Wagner (5.20) | $w_i \leftarrow w_i + \alpha_i\big(R - \sum_{j \in \mathcal{P}} w_j\big)$ for $i \in \mathcal{P}$ |
+| TD model of conditioning (5.21) | $\delta_t = R_{t+1} + \gamma\,\mathbf{w}^\top\mathbf{x}_{t+1} - \mathbf{w}^\top\mathbf{x}_t$, $\mathbf{w} \leftarrow \mathbf{w} + \alpha\,\delta_t\,\mathbf{x}_t$ |
 
 ---
 
@@ -1264,7 +1335,7 @@ The afterstate update (5.19) is the sample version of this, exactly as Q-learnin
 
 On the $n$-th visit to $s$, each action is chosen with probability at least $\varepsilon_n/|\mathcal{A}|$. These exploratory choices are made with fresh randomness given the past, so by the conditional (Lévy) extension of the Borel–Cantelli lemmas, exploration happens infinitely often (and then every action is tried infinitely often) if and only if $\sum_n \varepsilon_n = \infty$.
 
-- (a) Explores forever, but never becomes greedy: **not GLIE**. SARSA then converges, at best, to near the best $\varepsilon$-soft policy.
+- (a) Explores forever, but never becomes greedy: **not GLIE**. SARSA then converges, at best, to near the best $\varepsilon$-greedy policy (Section 10.2).
 - (b) $\sum 1/n = \infty$ and $\varepsilon \to 0$: **GLIE**.
 - (c) $\sum 1/n^2 < \infty$, so by the first Borel–Cantelli lemma exploratory actions occur only finitely often. Nothing then forces every action to be tried infinitely often (an action could still be tried as the *greedy* action if the argmax keeps switching), so the schedule is **not guaranteed to be GLIE**, and in typical runs it is not.
 - (d) $\sum 1/\sqrt n = \infty$ and $\varepsilon \to 0$: **GLIE**, and it explores much more than (b) for the same number of visits.
@@ -1353,6 +1424,49 @@ To detect this in practice, compare TD and MC estimates (or $n$-step estimates f
 
 </details>
 
+**Exercise 5.15 ★ (blocking from Rescorla–Wagner).** Use the Rescorla–Wagner rule (5.20) with US magnitude $R$ and equal step sizes $\alpha_A = \alpha_X = \alpha \in (0, 1)$. The blocking group gets $n_1$ trials of A → US and then $n_2$ trials of AX → US. The control group gets $n_1$ trials of B → US, with an unrelated stimulus B, and then the same $n_2$ AX trials. All strengths start at 0. (a) Find $w_A$ after phase 1 in the blocking group. (b) Find $w_X$ at the end of phase 2 in both groups, and evaluate it for $R = 1$, $\alpha = 0.1$, $n_1 = 200$, $n_2 = 100$. (c) In the control group, what does $w_X$ converge to if $\alpha_A \ne \alpha_X$?
+
+<details><summary>Solution</summary>
+
+(a) Each phase-1 trial multiplies the error by $1 - \alpha$: $R - w_A \leftarrow (1-\alpha)(R - w_A)$. After $n_1$ trials, $w_A = R\,[1 - (1-\alpha)^{n_1}]$.
+
+(b) In phase 2 both strengths move by $\alpha e$, where $e = R - w_A - w_X$ is the shared error. So $e \leftarrow (1-2\alpha)e$, $e_k = (1-2\alpha)^k e_0$, and summing X's increments gives
+
+$$
+w_X = \alpha\sum_{k=0}^{n_2-1} e_k = \frac{e_0}{2}\big[1 - (1-2\alpha)^{n_2}\big].
+$$
+
+Blocking: $e_0 = R(1-\alpha)^{n_1}$, the error A left over. Control: $e_0 = R$ (B is absent in phase 2). Numerically, $w_X = \tfrac12\, 0.9^{200}(1 - 0.8^{100}) \approx 3.5\times10^{-10}$ versus $\tfrac12(1 - 0.8^{100}) = 0.500$, as `conditioning_td.py` printed. X never gains more than half the error A leaves unexplained.
+
+(c) Both start at 0 and move in proportion to their step sizes, so $w_X / w_A = \alpha_X / \alpha_A$ throughout, while $e \leftarrow (1 - \alpha_A - \alpha_X)e \to 0$ for $0 < \alpha_A + \alpha_X < 2$. Hence $w_X \to R\,\alpha_X/(\alpha_A + \alpha_X)$: the more salient stimulus takes the larger share (**overshadowing**).
+
+</details>
+
+**Exercise 5.16 ★★ (second-order conditioning: the TD model can, Rescorla–Wagner cannot).** Phase 1 trains A → US to asymptote. Phase 2 presents B immediately followed by A, with no US; B is never paired with the US. (a) Rescorla–Wagner treats a phase-2 trial as the compound {B, A} with $R = 0$. Starting from $w_A = w_A^0 > 0$ and $w_B = 0$, show that $w_B < 0$ after every phase-2 trial, for any step sizes with $0 < \alpha_A + \alpha_B < 2$. (b) In the TD model (5.21) with CSC features, A is on for the ISI steps before the US, so after phase 1 the prediction $k$ steps after A's onset is $\gamma^{\text{ISI}-1-k}$. B occupies the single step just before A's onset. Compute the TD errors of the first phase-2 trial and the resulting change in B's weight. (c) How do the values of B and A evolve over many phase-2 trials? What does the model predict if, after B has been trained, A is extinguished on its own (A alone, no US)? Check (b) and (c) against Part D of `conditioning_td.py` ($\gamma = 0.95$, $\alpha = 0.1$, ISI = 6).
+
+<details><summary>Solution</summary>
+
+(a) Let $S = w_A + w_B$. A phase-2 trial changes $w_A$ by $-\alpha_A S$ and $w_B$ by $-\alpha_B S$, so $S \leftarrow rS$ with $r = 1 - \alpha_A - \alpha_B \in (-1, 1)$. After $n \ge 1$ trials
+
+$$
+w_B = -\alpha_B\, w_A^0 \sum_{k=0}^{n-1} r^k = -\alpha_B\, w_A^0\, \frac{1 - r^n}{1 - r} < 0,
+$$
+
+because $1 - r^n > 0$ and $1 - r = \alpha_A + \alpha_B > 0$. B becomes a conditioned *inhibitor*, converging to $-\alpha_B w_A^0/(\alpha_A + \alpha_B)$ ($-0.5$ in the script). (Presented alone, B would not change at all.) The only teaching signal in Rescorla–Wagner is the US, and phase 2 has none.
+
+(b) Let B be on at step $c-1$ and A from step $c$ to $u-1$, with the US due on arrival at step $u = c + \text{ISI}$. Before the trial $V_{c-1} = w_B = 0$, $V_{c+k} = \gamma^{\text{ISI}-1-k}$, and $V = 0$ on steps with no stimulus.
+
+- Arrival at B, from an empty step: the active features are all zero, so no weight changes.
+- From B to A: $\delta_{c-1} = 0 + \gamma V_c - V_{c-1} = \gamma \cdot \gamma^{\text{ISI}-1} - 0 = \gamma^{\text{ISI}} > 0$. The active feature is B's, so $w_B$ becomes $\alpha\gamma^{\text{ISI}} = 0.1 \times 0.95^6 = 0.0735$.
+- Within A: $\delta_t = \gamma V_{t+1} - V_t = 0$.
+- At the expected US time: $\delta_{u-1} = 0 + 0 - V_{u-1} = -1$, which lowers the weight of A's last feature by $\alpha$.
+
+After one trial B already predicts the US, although it was never paired with it: its TD target contains $\gamma V$ of the next step, where A predicts the US, whereas the Rescorla–Wagner target is the US alone. The script printed $V(\text{B onset}) = 0.0735$ after trial 1 and $0.1397 = 0.0735 + 0.1\,(0.735 - 0.0735)$ after trial 2.
+
+(c) While A's onset value is intact, $w_B$ approaches $\gamma V_c = 0.735$ geometrically. But the omission error extinguishes A's features from the last one backwards, and once this reaches A's onset ($V(\text{A onset}) = 0.765$ after 20 phase-2 trials, 0.477 after 50), B's target falls too: $V(\text{B onset})$ peaked at 0.685 after 30 trials and was 0.086 after 100. If instead A is extinguished on *separate* A-alone trials after B has been trained, B's weight does not change, because (5.21) updates only features of stimuli that are present: B carries a cached value, not a pointer to A. This agrees with Rizley and Rescorla (1972, *Journal of Comparative and Physiological Psychology*), who found second-order responding unaffected by extinction of the first-order stimulus: a model-free signature in the sense of Section 14.3.
+
+</details>
+
 ---
 
 ## Further reading
@@ -1368,6 +1482,8 @@ To detect this in practice, compare TD and MC estimates (or $n$-step estimates f
 - **Even-Dar, E., and Mansour, Y. (2003).** Learning rates for Q-learning. *Journal of Machine Learning Research* 5:1–25. Why $1/n$ is a bad step size for Q-learning and $1/n^\omega$ is better.
 - **Pardo, F., Tavakoli, A., Levdik, V., and Kormushev, P. (2018).** Time limits in reinforcement learning. *ICML*. The terminated-vs-truncated distinction, with experiments.
 - **Schultz, W., Dayan, P., and Montague, P. R. (1997).** A neural substrate of prediction and reward. *Science* 275:1593–1599. The dopamine–TD-error connection; pair it with S&B Chapter 15 and Glimcher (2011, *PNAS*) for a broader view.
+- **Sutton, R. S., and Barto, A. G. (1990).** Time-derivative models of Pavlovian reinforcement. In M. Gabriel and J. Moore (eds.), *Learning and Computational Neuroscience: Foundations of Adaptive Networks*, MIT Press, 497–537. The TD model of classical conditioning; S&B Chapter 14 is the textbook version.
+- **Niv, Y. (2009).** Reinforcement learning in the brain. *Journal of Mathematical Psychology* 53(3):139–154. Conditioning, dopamine, actor–critic and model-based versus model-free control, for readers who know RL.
 - **Tesauro, G. (1995).** Temporal difference learning and TD-Gammon. *Communications of the ACM* 38(3):58–68. TD learning's first spectacular success, and a nice example of afterstate values.
 
 ---

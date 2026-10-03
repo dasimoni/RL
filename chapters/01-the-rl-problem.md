@@ -780,7 +780,7 @@ With $\gamma = 0$ the values are just the expected immediate rewards. The $\inft
 
 ## 11. Checking by sampling: Monte Carlo estimates of v
 
-Definition (1.11) says that $v_\pi(s)$ is an *expectation*, so we can estimate it without a model by averaging returns sampled from the environment. This is the core idea of Monte Carlo methods ([Chapter 04](04-monte-carlo.md)). Here we use it only to confirm that the linear-algebra answer really is the expected return. For a continuing task we truncate each rollout after $H$ steps. That introduces a bias of at most $\gamma^H R_{\max}/(1-\gamma)$, which is $0.0027$ for $H = 100$, $R_{\max} = 10$ and $\gamma = 0.9$.
+Definition (1.11) says that $v_\pi(s)$ is an *expectation*, so we can estimate it without a model by averaging returns sampled from the environment. This is the core idea of Monte Carlo methods ([Chapter 04](04-monte-carlo.md)). Here we use it only to confirm that the linear-algebra answer really is the expected return. For a continuing task we truncate each rollout after $H$ steps. That introduces a bias of at most $\gamma^H R_{\max}/(1-\gamma)$, which is $0.0027$ for $H = 100$, $R_{\max} = 10$ and $\gamma = 0.9$. Throughout this chapter, $\pm$ after an estimate denotes a 95% confidence half-width, $1.96$ standard errors. Some later chapters, such as [Chapter 03](03-dynamic-programming.md), report one standard error instead, so their error bars are about half as wide for the same amount of data.
 
 ```text
 Algorithm: Monte Carlo estimate of v_π(s) from independent rollouts
@@ -936,7 +936,7 @@ Some facts that are easy to get wrong:
 
 ![FrozenLake: optimal values and the effect of a time limit](../code/ch01_the_rl_problem/figures/frozenlake_values.png)
 
-*Left: $v_\ast$ (probability of eventually reaching G) and all greedy actions for slippery 4×4 FrozenLake with $\gamma = 1$. Note the four-way tie at the start state. Right: under the optimal stationary policy the probability of success within $H$ steps approaches $v_\ast(\text{start})$ only for $H$ of a few hundred. At the default `TimeLimit(100)` the exact value is the 0.7402 of Section 4.5, and 10,000 simulated Gymnasium episodes give $0.7398 \pm 0.0086$, with 10.2% of them truncated. The dash-dotted curve is the best a policy can do if it also sees the number of steps left (value iteration with $\gamma = 1$ started from 0, whose $H$-th iterate is the optimal $H$-step success probability). It lies only slightly above the solid curve (0.7442 at $H = 100$). The expected episode length under the stationary policy is 48.7 steps. The time limit is a property of the simulator, not of the MDP.*
+*Left: $v_\ast$ (probability of eventually reaching G) and all greedy actions for slippery 4×4 FrozenLake with $\gamma = 1$. Note the four-way tie at the start state. Right: under the optimal stationary policy the probability of success within $H$ steps approaches $v_\ast(\text{start})$ only for $H$ of a few hundred. At the default `TimeLimit(100)` the exact value is the 0.7402 of Section 4.5, and 10,000 simulated Gymnasium episodes give $0.7398 \pm 0.0086$ (± is a 95% confidence half-width, about 1.96 standard errors; one standard error is 0.0044), with 10.2% of them truncated. The dash-dotted curve is the best a policy can do if it also sees the number of steps left (value iteration with $\gamma = 1$ started from 0, whose $H$-th iterate is the optimal $H$-step success probability). It lies only slightly above the solid curve (0.7442 at $H = 100$). The expected episode length under the stationary policy is 48.7 steps. The time limit is a property of the simulator, not of the MDP.*
 
 ### 12.5 Worked examples
 
@@ -1063,7 +1063,7 @@ Every algorithm in this course can be located along a handful of independent axe
 
 **Online vs offline.** *Online* agents learn while interacting, so their improving policy changes the data they collect. *Offline* (batch) agents learn from a fixed dataset with no further interaction, which is essential where exploration is dangerous or expensive, as in medicine or robotics ([Chapter 16](16-offline-rl-and-imitation.md)).
 
-**Tabular vs approximate.** *Tabular* methods store one number per state or state–action pair and come with clean convergence guarantees ([Chapters 02](02-multi-armed-bandits.md)–[07](07-planning-and-learning-tabular.md)). *Approximate* methods use linear functions or neural networks to generalise across states, which is necessary for large problems and comes with new failure modes ([Chapters 08](08-function-approximation.md)–[13](13-model-based-rl.md)).
+**Tabular vs approximate.** *Tabular* methods store one number per state or state–action pair ([Chapters 02](02-multi-armed-bandits.md)–[07](07-planning-and-learning-tabular.md); Chapter 02's contextual bandits already use linear models). Many of them have clean convergence guarantees (dynamic programming, TD, Q-learning), although some, such as Monte Carlo control with exploring starts, are only partly understood ([Chapter 04](04-monte-carlo.md)). *Approximate* methods use linear functions or neural networks to generalise across states, which is necessary for large problems and comes with new failure modes ([Chapters 08](08-function-approximation.md)–[13](13-model-based-rl.md)).
 
 **Sampling and bootstrapping.** A further distinction organises the classical algorithms by how they estimate the expectation in the Bellman equation. Do they average over *all* successor outcomes using a model (an expected update) or use *one sampled* outcome (a sample update)? And do they look one step ahead and use a current estimate of the next state's value (*bootstrapping*), or wait for the full return?
 
@@ -1086,7 +1086,7 @@ MCTS needs a model, but only as a simulator: it averages *sampled* rollouts rath
 
 | Chapter | Prediction / control | Model | Value / policy | On / off-policy | Online / offline | Tabular / approximate |
 |---|---|---|---|---|---|---|
-| [02 Bandits](02-multi-armed-bandits.md) | control (one state) | free | mostly value estimates | on | online | tabular |
+| [02 Bandits](02-multi-armed-bandits.md) | control (one state) | free | mostly value estimates | on | online | tabular (linear for contextual bandits) |
 | [03 Dynamic programming](03-dynamic-programming.md) | both | given | value | — | planning | tabular |
 | [04 Monte Carlo](04-monte-carlo.md) | both | free | value | both | online | tabular |
 | [05 TD, SARSA, Q-learning](05-temporal-difference.md) | both | free | value | both | online | tabular |

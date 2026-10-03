@@ -419,7 +419,7 @@ $$
 \tag{2.15}
 $$
 
-which is large, or even infinite for continuous $x$, wherever $b(x)\ll\pi(x)$.
+which is large wherever $b(x)\ll\pi(x)$. Over a finite set of outcomes (2.15) is a finite sum, but it can even be infinite when $x$ ranges over an infinite set: a continuous variable, or a trajectory of unbounded length even with finitely many actions ([Chapter 04](04-monte-carlo.md), Section 6.6).
 
 **Weighted (self-normalised) importance sampling (WIS)** divides by the sum of the weights instead of by $n$:
 
@@ -1157,7 +1157,7 @@ $$
 \tag{6.12}
 $$
 
-At $\mu=\sigma=1$ the three variances are **30, 18 and 4**. Note also how they scale with $\sigma$. As $\sigma\to0$ the no-baseline variance (6.10) blows up like $\mu^4/\sigma^2$, because the score $(x-\mu)/\sigma^2$ becomes huge while $f(x)\approx f(\mu)\neq0$ multiplies it. With the baseline $b=\mathbb E f$, (6.11) stays bounded and tends to $8\mu^2$: the factor $f(x)-b$ shrinks like $\sigma$ and cancels the $1/\sigma$. The pathwise variance $4\sigma^2$ vanishes. Nearly deterministic policies are therefore the worst case for score-function estimators *without a baseline*, which is one more reason always to use one.
+At $\mu=\sigma=1$ the three variances are **30, 18 and 4**. Note also how they scale with $\sigma$. As $\sigma\to0$ the no-baseline variance (6.10) blows up like $\mu^4/\sigma^2$, because the score $(x-\mu)/\sigma^2$ becomes huge while $f(x)\approx f(\mu)\neq0$ multiplies it. With the baseline $b=\mathbb E f$, (6.11) stays bounded and tends to $8\mu^2$: the factor $f(x)-b$ shrinks like $\sigma$ and cancels the $1/\sigma$. The pathwise variance $4\sigma^2$ vanishes. Nearly deterministic policies are therefore the worst case for score-function estimators *without a baseline*, which is one more reason always to use one. (This relies on $f$ being a deterministic function of $x$. If we observe only a noisy value $f(x)+\zeta$, with $\zeta$ independent zero-mean noise of variance $\sigma_\zeta^2$, the extra term $\zeta\xi/\sigma$ adds exactly $\sigma_\zeta^2/\sigma^2$ to (6.11), and no baseline can cancel it. In RL the sampled return is such a noisy value: it scatters around $q_\pi(s,a)$ even for a fixed action. That noise is still multiplied by the $1/\sigma$ score, and only a critic or the pathwise estimator removes it; see [Chapter 10](10-policy-gradients.md), Section 11.1, and [Chapter 12](12-continuous-control-actor-critic.md), Section 2.4.)
 
 ### 6.6 Trade-offs
 
@@ -1421,7 +1421,7 @@ All scripts run from the repository root, use fixed seeds (printed at start), an
 * **Over-reading the Robbins–Monro conditions.** They are sufficient, not necessary. $\alpha_n=n^{-0.3}$ converges in our experiment (§3.4), and deep RL routinely uses constant step sizes on purpose.
 * **Ignoring coverage in importance sampling.** If $b(a)=0$ where $\pi(a)>0$, no amount of data fixes the estimate. OIS silently drops the uncovered outcomes, and WIS can converge to the wrong value even when OIS happens to be unbiased (Exercise 5(c)).
 * **Trusting the empirical variance of importance weights.** Heavy tails make the sample variance, and even the measured MSE, wildly optimistic: $2.6\times10^{-7}$ measured vs $5.6\times10^{13}$ true at $H=64$ (§2.6).
-* **Calling WIS unbiased.** It is consistent and bounded, but biased. With one sample it estimates $\mathbb E_b[f]$, not $\mathbb E_\pi[f]$.
+* **Calling WIS unbiased.** It is consistent and bounded, but biased. With one sample it returns $f(X_1)$ whenever $\rho(X_1)>0$, so its mean is $\mathbb E_b\big[f\,\mathbb 1[\rho>0]\big]$ under the $0/0:=0$ convention of Algorithm 2.2. That is $\mathbb E_b[f]$ only when $\pi>0$ wherever $b>0$ (as in the worked example of §2.6), and in general it is not $\mathbb E_\pi[f]$. With a deterministic target policy, every sample on which $b$ departs from $\pi$ has $\rho=0$, and these are often the majority: only about 14% of the Blackjack episodes in [Chapter 04](04-monte-carlo.md) are usable (Sections 6.4–6.5).
 * **Forgetting that Banach needs $\gamma<1$ *and* the right norm.** A non-expansion need not converge, and the same operator can contract in $\lVert\cdot\rVert_\infty$ but expand in $\lVert\cdot\rVert_2$ (§4.4). The weighting matters too: the Bellman operator contracts in the 2-norm weighted by its *own* stationary distribution, which is why on-policy linear TD is safe and off-policy linear TD is not.
 * **Treating KL as a distance**, or forgetting it is infinite when the second argument assigns zero probability to an outcome the first allows: $D_{\mathrm{KL}}(\pi\Vert\pi_{\text{det}})=\infty$ for any $\pi$ that puts mass on more than one action.
 * **Using a baseline that depends on the sampled action** (or on $x$ in general). That introduces bias. A baseline may depend only on what is fixed before sampling.

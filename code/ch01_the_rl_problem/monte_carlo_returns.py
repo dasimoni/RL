@@ -120,7 +120,7 @@ def main() -> None:
     gl, lengths = geometric_lifetime_returns(nxt, rew, np.full(n_long, A), gamma, rng)
     se_l = gl.std(ddof=1) / np.sqrt(n_long)
     print(f"\n[4] undiscounted returns with termination probability 1-gamma={1 - gamma:.1f} per step, from A:")
-    print(f"    mean {gl.mean():.4f} +- {1.96 * se_l:.4f}  (exact discounted value {v_exact[A]:.4f}); "
+    print(f"    mean {gl.mean():.4f} +- {1.96 * se_l:.4f} (95% CI half-width)  (exact discounted value {v_exact[A]:.4f}); "
           f"mean episode length {lengths.mean():.2f} (1/(1-gamma) = {1 / (1 - gamma):.0f}); "
           f"std of returns {gl.std():.3f} vs {gA.std():.3f} for discounted returns")
 

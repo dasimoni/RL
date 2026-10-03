@@ -11,7 +11,7 @@ Real problems rarely come with a perfect model, but DP still matters for two rea
 **Learning objectives.** After this chapter you should be able to:
 
 - define the Bellman operators $\mathcal{T}^\pi$ and $\mathcal{T}^\ast$ on state values and on action values, prove that they are monotone $\gamma$-contractions in the max norm, and derive the a-priori, a-posteriori and residual error bounds that follow;
-- finish the proof, begun in Chapter 01, that $v_\ast$ is the *unique* solution of the Bellman optimality equation and that a deterministic stationary policy is optimal among *all* policies;
+- finish Theorem 1.1 of Chapter 01 by proving that $v_\ast$ is the *unique* solution of the Bellman optimality equation, and re-derive independently, via the fixed point of $\mathcal{T}^\ast$, that a deterministic stationary policy is optimal among *all* policies;
 - implement iterative policy evaluation (two-array and in-place), and say exactly what its stopping rule guarantees;
 - state and prove the policy improvement theorem, implement policy iteration, and prove that it terminates in finitely many iterations with an optimal policy;
 - implement value iteration, choose a threshold that guarantees an $\epsilon$-optimal greedy policy, prove the $2\gamma/(1-\gamma)$ bound behind it, and explain why it often converges faster than $\gamma^k$;
@@ -19,15 +19,16 @@ Real problems rarely come with a perfect model, but DP still matters for two rea
 - recognise **generalized policy iteration** (GPI), the pattern that organises the whole course;
 - write an MDP as a linear program, derive its dual, and interpret the dual variables as discounted state–action occupancy measures;
 - solve finite-horizon problems by backward induction and explain why their optimal policies depend on time;
+- solve the linear-quadratic regulator exactly by backward induction (the Riccati recursion), recognise policy iteration on it as Hewer's algorithm, and explain how iLQR/DDP and the Hamilton–Jacobi–Bellman equation carry DP to nonlinear and continuous-time control;
 - estimate the cost of each method and explain the curse of dimensionality.
 
-**Prerequisites.** [Chapter 01](01-the-rl-problem.md): MDPs, $v_\pi$, $q_\pi$, $v_\ast$, $q_\ast$, the Bellman equations (1.15), (1.23), their matrix form (1.17)–(1.19), and Theorem 1.1. [Chapter 00](00-math-toolkit.md), Section 4: norms and the Banach fixed-point theorem. Section 10 uses basic linear-programming duality, which is recalled there. [Chapter 02](02-multi-armed-bandits.md) is not needed here.
+**Prerequisites.** [Chapter 01](01-the-rl-problem.md): MDPs, $v_\pi$, $q_\pi$, $v_\ast$, $q_\ast$, the Bellman equations (1.15), (1.23), their matrix form (1.17)–(1.19), and Theorem 1.1. [Chapter 00](00-math-toolkit.md), Section 4: norms and the Banach fixed-point theorem. Section 10 uses basic linear-programming duality, which is recalled there. Sections 11.4–11.5 use gradients of quadratic forms and positive (semi)definite matrices, and connect to [Chapter 12](12-continuous-control-actor-critic.md), Section 2.6 (a scalar linear-quadratic example), which is not needed beforehand. [Chapter 02](02-multi-armed-bandits.md) is not needed here.
 
-**Code you will run** (all in [`code/ch03_dynamic_programming/`](../code/ch03_dynamic_programming/)): a reproduction of Sutton & Barto's gridworld Figure 4.1; policy and value iteration on Gymnasium's FrozenLake, read straight from `env.unwrapped.P`, with convergence plots and a simulation check; the gambler's problem; the LP solution and its dual with `scipy.optimize.linprog`; asynchronous backup orders; backward induction under Gymnasium's 100-step time limit; timing comparisons of PI, VI and modified PI; and a script that reproduces every hand calculation in the text. Everything runs in about two minutes on one core.
+**Code you will run** (all in [`code/ch03_dynamic_programming/`](../code/ch03_dynamic_programming/)): a reproduction of Sutton & Barto's gridworld Figure 4.1; policy and value iteration on Gymnasium's FrozenLake, read straight from `env.unwrapped.P`, with convergence plots and a simulation check; the gambler's problem; the LP solution and its dual with `scipy.optimize.linprog`; asynchronous backup orders; backward induction under Gymnasium's 100-step time limit; the Riccati recursion, Hewer's policy iteration and grid-based value iteration for linear-quadratic problems, and an iLQR swing-up of Gymnasium's pendulum; timing comparisons of PI, VI and modified PI; and a script that reproduces every hand calculation in the text. Everything runs in a little over two minutes on one core.
 
-**Study time.** About 6–8 hours for the text and 4–5 hours for the exercises.
+**Study time.** About 7–9 hours for the text and 5–6 hours for the exercises.
 
-**Notation** follows [NOTATION.md](../NOTATION.md). Some conventions are specific to this chapter. (i) We identify a function $v:\mathcal{S}\to\mathbb{R}$ with the column vector $(v(s))_{s\in\mathcal{S}}$ and write it in plain type ($v$, $V$), although NOTATION.md bolds vectors. As in Chapter 01, the matrices $\mathbf{P}_\pi$ and the reward vector $\mathbf{r}_\pi$ are bold. (ii) For vectors, $u \le w$ means $u(s) \le w(s)$ for every $s$, and $\mathbf{1}$ is the all-ones vector. (iii) $\epsilon$ is an accuracy target. It is not the exploration rate $\varepsilon$ of $\varepsilon$-greedy (NOTATION.md reserves $\epsilon$ for PPO's clip range; we borrow it here). (iv) In Section 10, $\mu$ is a strictly positive weight vector over states (often the initial distribution, $d_0$ in NOTATION.md), and $d^\pi_\mu$ is the *unnormalised* discounted state occupancy, with total mass $1/(1-\gamma)$ when no episode terminates; NOTATION.md's normalised $d^\pi$ is then $(1-\gamma)d^\pi_\mu$. (v) In Sections 5.2 and 12, $n = \lvert\mathcal{S}\rvert$. (vi) $\beta$ in Section 2.4 and Exercise 5 is a termination probability, unrelated to the KL coefficient of Chapter 18. "S&B" means Sutton & Barto (2018), Chapter 4, which this chapter follows and extends. Sections marked \* contain proofs that can be skimmed on a first reading; their statements are used later.
+**Notation** follows [NOTATION.md](../NOTATION.md). Some conventions are specific to this chapter. (i) We identify a function $v:\mathcal{S}\to\mathbb{R}$ with the column vector $(v(s))_{s\in\mathcal{S}}$ and write it in plain type ($v$, $V$), although NOTATION.md bolds vectors. As in Chapter 01, the matrices $\mathbf{P}_\pi$ and the reward vector $\mathbf{r}_\pi$ are bold. (ii) For vectors, $u \le w$ means $u(s) \le w(s)$ for every $s$, and $\mathbf{1}$ is the all-ones vector. (iii) $\epsilon$ is an accuracy target. It is not the exploration rate $\varepsilon$ of $\varepsilon$-greedy (NOTATION.md reserves $\epsilon$ for PPO's clip range; we borrow it here). (iv) In Section 10, $\mu$ is a strictly positive weight vector over states (often the initial distribution, $d_0$ in NOTATION.md), and $d^\pi_\mu$ is the *unnormalised* discounted state occupancy, with total mass $1/(1-\gamma)$ when no episode terminates; NOTATION.md's normalised $d^\pi$ is then $(1-\gamma)d^\pi_\mu$. (v) In Sections 5.2 and 12, $n = \lvert\mathcal{S}\rvert$. (vi) $\beta$ in Section 2.4 and Exercise 5 is a termination probability, unrelated to the KL coefficient of Chapter 18. (vii) $b$ is the maximum number of successor states of a state–action pair (the branching factor of Chapter 07), not a behaviour policy; $\theta$ (not bold) is the stopping threshold of iterative policy evaluation and value iteration, not a policy parameter vector (except in Section 11.4, where it is the scalar gain of Chapter 12's linear policy). Sections 11.4–11.5 use further local symbols for continuous states, defined where they appear. "S&B" means Sutton & Barto (2018), Chapter 4, which this chapter follows and extends. Sections marked \* contain proofs that can be skimmed on a first reading; their statements are used later.
 
 ---
 
@@ -42,7 +43,7 @@ DP addresses two problems:
 * **Prediction (policy evaluation):** given a policy $\pi$, compute $v_\pi$ (or $q_\pi$).
 * **Control:** find an optimal policy $\pi_\ast$, and $v_\ast$ or $q_\ast$ along the way.
 
-Throughout this chapter we assume a **finite** MDP ($\mathcal{S}$ and every $\mathcal{A}(s)$ finite) whose dynamics are known. For expected returns we never need the full four-argument $p(s', r \mid s, a)$. The expected reward $r(s,a)$ (1.8) and the transition probabilities $p(s' \mid s,a)$ (1.7) are enough. Unless stated otherwise $0 \le \gamma < 1$. Section 2.8 says what changes for episodic tasks with $\gamma = 1$.
+Throughout this chapter we assume a **finite** MDP ($\mathcal{S}$ and every $\mathcal{A}(s)$ finite) whose dynamics are known; only Sections 11.4–11.5 consider continuous states and actions. For expected returns we never need the full four-argument $p(s', r \mid s, a)$. The expected reward $r(s,a)$ (1.8) and the transition probabilities $p(s' \mid s,a)$ (1.7) are enough. Unless stated otherwise $0 \le \gamma < 1$. Section 2.8 says what changes for episodic tasks with $\gamma = 1$.
 
 ### 1.2 What we already know
 
@@ -1011,6 +1012,125 @@ Simulating 10,000 episodes in the real environment gives 0.6383 ± 0.0048 for th
 
 Three lessons. (1) The optimal policy for a time-limited task **depends on the time left**. In 8×8, the $\gamma = 0.99$ stationary action is strictly worse in 353 of the 5,300 (time, non-terminal state) pairs. These are states where the balance between a safe detour and a quick approach to G shifts as the deadline nears. (2) The gain from non-stationarity is modest here (0.6407 vs 0.6317). The **$\gamma = 1$ policy, however, is badly wrong for the time-limited task** (0.5143). It is so careful that it often runs out of time: it reaches G with probability 1 eventually, but takes 117 steps on average (Section 5.4). A discount slightly below 1 is a reasonable stand-in for an unknown deadline. (3) If the time limit is part of the task, the state must include the time left, or the problem is no longer Markov. Pardo et al. (2018) discuss both cases for deep RL.
 
+### 11.4 Continuous states: the linear-quadratic regulator
+
+Backward induction used finiteness only to store $V_t$ as a table and to maximise by enumeration. In one important continuous problem neither is needed: $V_t$ stays in a family described by finitely many numbers, and the maximum has a closed form. This is the **linear-quadratic regulator (LQR)**, the workhorse of control engineering since Kalman (1960).
+
+*Setting.* States are vectors $s \in \mathbb{R}^{d_s}$ and actions are vectors $a \in \mathbb{R}^{d_a}$. The dynamics are linear and the reward is a negative quadratic:
+
+$$
+S_{t+1} = F S_t + G A_t + W_t, \qquad R_{t+1} = -\big(S_t^\top C_s S_t + A_t^\top C_a A_t\big), \tag{3.29}
+$$
+
+where the noise terms $W_t$ are independent, with mean 0 and covariance $\Sigma_w$, $C_s$ is symmetric positive semidefinite and $C_a$ is symmetric positive definite. This is the scalar example of [Chapter 12](12-continuous-control-actor-critic.md), Section 2.6, with matrices. *Local notation*, as in Chapter 12: vectors and matrices are in plain type; $F$ and $G$ are matrices, not returns; $P_t$ is the matrix of a quadratic value function, not a transition matrix $\mathbf{P}_\pi$; $K_t$ is a feedback gain and $c_t$ a scalar. We allow a terminal payoff $h(s) = -s^\top P_H s$, often with $P_H = 0$.
+
+*Backward induction with a quadratic guess.* Suppose $V_{t+1}(s) = -s^\top P_{t+1}s - c_{t+1}$ with $P_{t+1} \succeq 0$. Because $\mathbb{E}[W_t] = 0$ and $\mathbb{E}[W_t^\top P W_t] = \mathrm{tr}(P\Sigma_w)$, one step of Algorithm 3.6 gives
+
+$$
+Q_t(s,a) = -s^\top C_s s - a^\top C_a a - \gamma\,(Fs+Ga)^\top P_{t+1}(Fs+Ga) - \gamma\big(c_{t+1} + \mathrm{tr}(P_{t+1}\Sigma_w)\big).
+$$
+
+This is a strictly concave quadratic in $a$, with Hessian $-2(C_a + \gamma G^\top P_{t+1}G) \prec 0$, so the maximum over $a$ is where the gradient vanishes:
+
+$$
+a^\ast_t(s) = -K_t s, \qquad K_t = \gamma\big(C_a + \gamma G^\top P_{t+1}G\big)^{-1}G^\top P_{t+1}F. \tag{3.30}
+$$
+
+Substituting back gives $V^\ast_t(s) = -s^\top P_t s - c_t$ with
+
+$$
+P_t = C_s + \gamma F^\top P_{t+1}F - \gamma^2 F^\top P_{t+1}G\big(C_a + \gamma G^\top P_{t+1}G\big)^{-1}G^\top P_{t+1}F, \qquad c_t = \gamma\big(c_{t+1} + \mathrm{tr}(P_{t+1}\Sigma_w)\big), \tag{3.31}
+$$
+
+starting from $P_H$ and $c_H = 0$ (Exercise 15). The same $P_t$ can be written as $C_s + K_t^\top C_a K_t + \gamma(F - GK_t)^\top P_{t+1}(F - GK_t)$, a sum of positive semidefinite terms, so $P_t \succeq 0$ and the induction continues. The guess reproduces itself, so every optimal value-to-go is quadratic and every optimal decision rule is linear. This is the **discrete-time Riccati recursion**: Algorithm 3.6 with the table replaced by a $d_s \times d_s$ matrix and the maximisation by a linear solve, at $O(d_s^3 + d_a^3)$ per stage. The proof of Theorem 3.9 carries over, since its inductive step only needs the maximum to be attained. (The rewards are unbounded, so Section 2's infinite-horizon results do not apply as they stand.)
+
+**Certainty equivalence.** $\Sigma_w$ enters $c_t$ but neither $P_t$ nor $K_t$. The optimal gains are those of the noise-free system; the noise only lowers the value by a constant (Chapter 12's Exercise 3 found $c = \gamma P\sigma_w^2/(1-\gamma)$ for a fixed linear policy). This needs additive noise. With multiplicative noise, such as a random $G$, the gain depends on the noise level (Exercise 15).
+
+**The stationary problem.** As the number of steps to go grows, (3.31) is value iteration on the quadratic functions. Under standard stabilisability and detectability conditions (Bertsekas, *Dynamic Programming and Optimal Control*, Vol. I), $P_t$ converges to the solution $P$ of the discounted **discrete algebraic Riccati equation (DARE)**
+
+$$
+P = C_s + \gamma F^\top P F - \gamma^2 F^\top P G\big(C_a + \gamma G^\top P G\big)^{-1}G^\top P F, \tag{3.32}
+$$
+
+and the optimal stationary policy is $a = -Ks$, with $K$ given by (3.30) at $P$. The constant becomes $c = \gamma\,\mathrm{tr}(P\Sigma_w)/(1-\gamma)$. Equation (3.32) is the *undiscounted* DARE for the pair $(\sqrt\gamma F, \sqrt\gamma G)$, so `scipy.linalg.solve_discrete_are(sqrt(γ)·F, sqrt(γ)·G, C_s, C_a)` returns the discounted $P$. Forgetting the scaling silently solves a different problem.
+
+[`lqr_riccati.py`](../code/ch03_dynamic_programming/lqr_riccati.py) checks this on a random system ($d_s = 4$, $d_a = 2$, unstable $F$ with spectral radius 1.1, $\gamma = 0.95$, $H = 50$, $\Sigma_w = 0.1\,\mathbf{I}$). The gains with and without noise are identical. From $s_0 = (1,1,1,1)$, $V^\ast_0(s_0) = -32.855$, of which $-16.137$ is $-c_0$; 20,000 simulated trajectories give $-32.873 \pm 0.028$. $\lVert P_t - P\rVert/\lVert P\rVert$ is 0.71 with one step to go, $1.9\times10^{-6}$ with 10, and below $10^{-10}$ after 17, shrinking near the limit by $\gamma\rho(F - GK)^2 = 0.22$ per step. SciPy agrees with the recursion's limit to $1.5\times10^{-10}$; without the $\sqrt\gamma$ scaling it is 4% off.
+
+**Worked check: Chapter 12's scalar problem.** Take $F = G = c_s = c_a = 1$ and $\gamma = 0.9$. Equation (3.32) reads $P = 1 + 0.9P - 0.81P^2/(1 + 0.9P)$. Multiplying by $1 + 0.9P$ gives $P + 0.9P^2 = 1 + 1.8P$, that is $0.9P^2 - 0.8P - 1 = 0$, so $P = (0.8 + \sqrt{4.24})/1.8 = 1.5884$. Then $K = 0.9P/(1 + 0.9P) = 0.5884$. Chapter 12's linear policy $\mu_\theta(s) = \theta s$ is therefore optimal at $\theta^\ast = -K = -0.5884$, with $J(\theta^\ast) = -P\,\mathbb{E}[S_0^2] = -1.5884$; maximising Chapter 12's closed-form $J(\theta)$ numerically gives the same values to six digits. Chapter 12's process noise $\sigma_w = 0.3$ leaves $\theta^\ast$ unchanged and lowers $J(\theta^\ast)$ to $-1.5884 - 0.9 \cdot 1.5884 \cdot 0.09/0.1 = -2.875$.
+
+**Policy iteration is Hewer's algorithm, that is, Newton's method.** *Evaluate* the linear policy $a = -K_k s$: its value is $-s^\top P_k s$ plus a constant, where $P_k$ solves the linear **Lyapunov equation** $P_k = C_s + K_k^\top C_a K_k + \gamma(F - GK_k)^\top P_k (F - GK_k)$, the analogue of (1.18). It has a finite solution only if $\sqrt\gamma(F - GK_k)$ is stable, the analogue of a proper policy (Section 2.8). *Improve* by taking the greedy gain (3.30) at $P_k$. This is **Hewer's algorithm** (Hewer, 1971; Kleinman, 1968, in continuous time). As in Section 5, it is Newton's method on the Bellman equation, here on $P \mapsto (\text{right-hand side of (3.32)}) - P$, and converges quadratically (Exercise 16). On the scalar problem from $K_0 = 0$, Hewer's iteration and Newton's method both give $P_k = 10,\ 1.8264,\ 1.5915,\ 1.588404,\ 1.588403$ (difference at most $2.4\times10^{-15}$). On random systems ($d_a = d_s/2$, $C_s = \mathbf{I}$, $C_a = \mathbf{I}$, unstable $F$ with spectral radius 1.02, $\gamma = 0.95$), starting from the passive policy $K_0 = 0$, which is admissible because $\sqrt{0.95}\cdot 1.02 = 0.994 < 1$:
+
+| $d_s$ | PI evaluations | VI sweeps (Riccati map from $P = 0$) | $\gamma\rho(F - GK)^2$ at the optimum |
+|---|---|---|---|
+| 2 | 5 | 1,078 | 0.979 |
+| 4 | 6 | 13 | 0.112 |
+| 8 | 5 | 24 | 0.372 |
+| 16 | 6 | 22 | 0.316 |
+| 64 | 6 | 24 | 0.358 |
+
+Both stop at a relative error below $10^{-10}$. PI's error roughly squares at each step (for $d_s = 16$: $40$, $0.6$, $0.04$, $3\times10^{-4}$, $3\times10^{-8}$, $5\times10^{-15}$). VI's sweep count is set by the closed-loop contraction rate, hence 1,078 sweeps for the $d_s = 2$ system with a slow optimal closed loop. This is the trade of Section 7.3 again; at these sizes both methods take milliseconds.
+
+**What a table would cost.** Discretise the state space instead, spread each successor state over the neighbouring grid points by linear interpolation, and run Algorithm 3.3 on the resulting finite MDP. On Chapter 12's 1-D problem (grid on $[-2,2]$, actions with the same spacing), the largest relative error of $V$ on $\lvert s\rvert \le 1$ is 1.8% with 21 points, 0.15% with 81 and 0.004% with 641. On a 2-D double integrator (time step 0.5, $C_s = \mathbf{I}$, $C_a = 1$, $\gamma = 0.95$, grid on $[-3,3]^2$, errors on $[-1,1]^2$) it is 3.0% with $41^2$ states, 0.66% with $81^2 = 6{,}561$ states (81 actions, 1.7 million transition entries) and 0.21% with $161^2$ states (6.3 million entries). With 81 points per axis a 6-D state would need $81^6 \approx 2.8\times10^{11}$ states, while SciPy solves the DARE exactly in under a millisecond. LQR is the exception to the curse of dimensionality (Section 12.3): linear dynamics and quadratic rewards keep $V$ in a family with $d_s(d_s+1)/2$ parameters that $\mathcal{T}^\ast$ maps into itself, the ideal that function approximation rarely attains ([Chapter 08](08-function-approximation.md)).
+
+**LQG and the separation principle.** If the agent observes only $O_t = M S_t + N_t$, with Gaussian $N_t$, $W_t$ and $S_0$, the problem is a POMDP ([Chapter 15](15-beyond-mdps.md)) whose belief stays Gaussian. Its mean $\hat s_t$ is computed by the **Kalman filter**, the linear-Gaussian case of the Bayes filter of Chapter 15, Section 2.3, and its covariance evolves independently of the actions. The optimal policy is $a_t = -K_t\hat s_t$ with the gains of (3.30). This **separation principle** of linear-quadratic-Gaussian (LQG) control (estimate as if there were no control, control as if the estimate were the state) is certainty equivalence once more, and holds only in this linear-Gaussian setting.
+
+**LQR as an RL testbed.** With $F$ and $G$ unknown, LQR is the simplest continuous control problem with a known optimum, and the standard testbed of RL theory for continuous control (Recht, 2019). Bradtke (NIPS 1992) noted that $q_\pi$ of a linear policy is quadratic in $(s,a)$, so policy iteration on $Q$ can run from data. Fazel, Ge, Kakade & Mesbahi (ICML 2018) showed that the cost is *non-convex* in $K$ (the set of stabilising gains is not even convex) but satisfies gradient domination, so policy gradient and natural policy gradient converge globally, with polynomially many samples when gradients are estimated from rollouts: the continuous analogue of [Chapter 19](19-rl-theory.md), Section 8.2. Dean, Mania, Matni, Recht & Tu (*Foundations of Computational Mathematics*, 2020) analysed the model-based route: estimate $(F, G)$ by least squares, bound the error, and design a controller robust to it.
+
+### 11.5 Beyond linear-quadratic: iLQR, DDP and the HJB equation
+
+For nonlinear dynamics $V$ is no longer quadratic, but it is approximately quadratic near a trajectory. Take deterministic dynamics $s_{t+1} = f(s_t, a_t)$, a smooth reward $r(s, a)$, a horizon $H$ and a terminal payoff $h$. Around a nominal trajectory $(\bar s_t, \bar a_t)$, linearise $f$ and expand $r$ to second order. This gives an LQ problem in the deviations $\delta s_t = s_t - \bar s_t$, $\delta a_t = a_t - \bar a_t$. Solve it with a Riccati-like backward pass, roll the improved controls through the *true* $f$, and repeat: the **iterative LQR (iLQR)** of Li & Todorov (2004). **Differential dynamic programming (DDP)** (Mayne, 1966; Jacobson & Mayne, 1970) also keeps the second derivatives of $f$, which costs more per iteration and gives quadratic convergence near the optimum.
+
+```text
+Algorithm 3.7  iLQR (maximise Σ_{t<H} γ^t r(s_t, a_t) + γ^H h(s_H) for known f, r, h)
+Input:  s_0; nominal actions ā_0, ..., ā_{H−1}; regularisation ν ≥ 0
+Subscripts are derivatives at (s̄_t, ā_t); V_s, V_ss are those of the next stage's value.
+Repeat until the return stops improving:
+    Roll out s̄_{t+1} = f(s̄_t, ā_t) from s̄_0 = s_0; let J̄ be its return
+    Backward pass:  V_s ← ∇h(s̄_H),  V_ss ← ∇²h(s̄_H)
+    For t = H−1, ..., 0:
+        Q_s  = r_s + γ f_sᵀ V_s                Q_a  = r_a + γ f_aᵀ V_s
+        Q_ss = r_ss + γ f_sᵀ V_ss f_s           Q_aa = r_aa + γ f_aᵀ V_ss f_a       Q_as = r_as + γ f_aᵀ V_ss f_s
+        Q̃_aa = r_aa + γ f_aᵀ (V_ss − νI) f_a    Q̃_as = r_as + γ f_aᵀ (V_ss − νI) f_s          (regularised)
+        If Q̃_aa is not negative definite: increase ν and restart the backward pass
+        k_t ← −Q̃_aa⁻¹ Q_a;    K_t ← Q̃_aa⁻¹ Q̃_as                   (δa = k_t − K_t δs)
+        V_s  ← Q_s − K_tᵀ Q_a − K_tᵀ Q_aa k_t + Q_asᵀ k_t
+        V_ss ← Q_ss + K_tᵀ Q_aa K_t − K_tᵀ Q_as − Q_asᵀ K_t
+    Forward pass with line search, for α = 1, 1/2, 1/4, ...:
+        s_0 ← s̄_0;   a_t ← ā_t + α k_t − K_t (s_t − s̄_t);   s_{t+1} ← f(s_t, a_t)
+        accept the first α whose return exceeds J̄ by at least 10% of the predicted improvement
+    If a step was accepted: (s̄, ā) ← the new trajectory and decrease ν;  else increase ν
+Output: a locally optimal trajectory and the time-varying feedback policy a_t = ā_t − K_t (s − s̄_t)
+```
+
+The sign convention matches (3.30). On an LQ problem one backward pass returns exactly the Riccati gains: on the system of Section 11.4 ($\gamma = 1$, $H = 30$) the gains agree to $5.6\times10^{-16}$ and the return after one iteration equals $-s_0^\top P_0 s_0 = -17.3325$. Elsewhere $Q_{aa}$ can fail to be negative definite, for instance near a *minimum* of the reward such as a pendulum hanging down. The regulariser $\nu$ then interpolates, Levenberg–Marquardt style, between a Newton step ($\nu = 0$) and a short gradient step (large $\nu$); we regularise $V_{ss}$ as Tassa, Erez & Todorov (2012) recommend. Each backward pass is DP in local coordinates, so the output is a *local* optimum with a feedback law valid in a tube around the trajectory, not a global policy.
+
+**Experiment: swinging up Gymnasium's pendulum.** In Pendulum-v1 (time step 0.05 s, $\theta = 0$ upright) the torque $\lvert a\rvert \le 2$ is too weak to lift the pendulum directly. The script gives iLQR the exact Gymnasium dynamics and a smooth stand-in for its reward, $-(2(1 - \cos\theta) + 0.1\dot\theta^2 + 0.001a^2)$, which matches Gymnasium's $-(\theta^2 + \dots)$ to second order at the top, and clamps the torque (Tassa, Mansard & Todorov, 2014, treat general box constraints). From rest hanging down with $H = 100$ (5 s), iLQR started from 10 random torque sequences ($\mathcal{N}(0, 0.1^2)$ per step) always converges to the same swing-up, with model return $-169.63$, in 76 to 130 iterations (about 1 s per run). The plan first swings the pendulum about 56° to one side to gain energy, then drives it over the top on the other side. It is within 0.1 rad of upright from step 61 (3.05 s), with the torque at its limit in 54% of the steps. Two failures show that iLQR is local:
+
+* From all-zero torques it stops immediately. Hanging still is a stationary point, because by symmetry the gradient vanishes there.
+* With $H = 200$, 9 of the 10 random starts converge within 11 to 21 iterations to a local optimum that never lifts the pendulum (return $-772.53$). Only one finds the swing-up, after 246 iterations.
+
+In Gymnasium we follow the iLQR feedback policy for 100 steps and then hand over to the infinite-horizon LQR controller of the upright linearisation (undiscounted DARE, $C_s = \mathrm{diag}(1, 0.1)$, $C_a = 0.001$, $K = (19.69, 5.26)$). This "swing up, then catch" controller ends upright, with return $-295.5$ over the 200-step episode in Gymnasium's own reward, which charges $\theta^2 \approx 9.9$ per step at the bottom against our stand-in's 4. The simulated states match the plan to $7\times10^{-8}$ (the float32 rounding of actions). For scale, Chapter 13's CEM planner with the true model scored between $-1$ and $-359$ from random starts; hanging at rest is the hardest start.
+
+![LQR and iLQR](../code/ch03_dynamic_programming/figures/lqr_ilqr.png)
+
+*Left: relative error of $P_k$ for policy iteration (Hewer, solid) and value iteration (the Riccati map from $P = 0$, dashed) on random systems with $d_s = 2, 16, 64$. Middle: relative error of grid-based value iteration against $-s^\top P s$ as the number of grid states grows, in 1-D and 2-D. Right: the iLQR swing-up executed in Pendulum-v1 ($\cos\theta$, with 1 = upright, and the torque divided by its limit 2), then the LQR catch from 5 s on; dotted: a 200-step iLQR run stuck at the local optimum.*
+
+**Where iLQR is used.** Being local and fast, iLQR is usually run inside **model-predictive control** ([Chapter 13](13-model-based-rl.md), Section 4.1): re-solved at every step over a short horizon and warm-started from the previous solution shifted by one step, so a good initial guess is always at hand. Tassa, Erez & Todorov (IROS 2012) made a simulated humanoid get up from the ground this way, at about seven times slower than real time. **Guided policy search** (Levine & Koltun, ICML 2013) turns many local DDP solutions into training targets for one neural-network policy. With a learned model, $f_s$ and $f_a$ come from automatic differentiation of the network.
+
+**Continuous time: the Hamilton–Jacobi–Bellman equation.** Take dynamics $\dot s = f(s, a)$, a reward *rate* $r(s,a)$ and a discount *rate* $\eta > 0$, so that the value is $V(s) = \sup \int_0^\infty e^{-\eta t} r(s(t), a(t))\,dt$. Over a short interval $\Delta t$ the principle of optimality gives
+
+$$
+V(s) = \max_a\big[r(s,a)\,\Delta t + e^{-\eta\Delta t}\,V\big(s + f(s,a)\,\Delta t\big)\big] + o(\Delta t),
+$$
+
+which is the Bellman optimality equation (1.23) for a deterministic MDP with reward $r\Delta t$, discount $\gamma = e^{-\eta\Delta t}$ and the Euler step $s \mapsto s + f\Delta t$. Expanding $V(s + f\Delta t) = V(s) + \nabla V(s)^\top f\,\Delta t + o(\Delta t)$ and $e^{-\eta\Delta t} = 1 - \eta\Delta t + o(\Delta t)$, dividing by $\Delta t$ and letting $\Delta t \to 0$ gives the **Hamilton–Jacobi–Bellman (HJB) equation**
+
+$$
+\eta\,V(s) = \max_a\big[r(s,a) + \nabla V(s)^\top f(s,a)\big]. \tag{3.33}
+$$
+
+With a finite horizon, $-\partial_t V(s,t) = \max_a[r(s,a) + \nabla_s V(s,t)^\top f(s,a)]$ with $V(s,T) = h(s)$; for LQ problems the quadratic guess turns (3.33) into the continuous-time Riccati equation. Read backwards, an MDP obtained by time-stepping a continuous system is an Euler discretisation of the HJB equation; Doya (*Neural Computation*, 2000) built continuous-time TD learning on this. Two consequences follow. First, $\gamma = e^{-\eta\Delta t} \to 1$ as $\Delta t \to 0$, so the effective horizon $1/(1-\gamma) \approx 1/(\eta\Delta t)$, and by (3.12) the number of VI sweeps, grow like $1/\Delta t$. Second, $q(s,a) - v(s) = O(\Delta t)$, so the action values of different actions collapse onto one another and Q-learning loses the signal it needs to rank them (Tallec, Blier & Ollivier, ICML 2019). Value functions of control problems are often not differentiable (for example on the switching curves of bang-bang controllers like the pendulum's), and (3.33) then holds in the sense of viscosity solutions (Crandall & Lions, 1983). **Pontryagin's maximum principle** (Pontryagin, Boltyanskii, Gamkrelidze & Mishchenko, 1962) is the trajectory-wise counterpart: necessary conditions along one optimal trajectory, with a costate playing the role of $\nabla V$ along it. DDP sits between the two, expanding $V$ to second order around one trajectory.
+
 ---
 
 ## 12. Computational complexity and the curse of dimensionality
@@ -1054,12 +1174,12 @@ Part B of [`timing_comparison.py`](../code/ch03_dynamic_programming/timing_compa
 
 ### 12.3 The curse of dimensionality
 
-For a fixed discount factor and accuracy, all of these methods are *polynomial* in the number of states and actions (the LP is polynomial in the input bit size in general). That is vastly better than enumerating the $\lvert\mathcal{A}\rvert^n$ deterministic policies; for the 25-state gridworld of Chapter 01 there are $4^{25} \approx 1.1\times10^{15}$ of them. The trouble is the number of states itself. A state described by $d$ variables, each with $\ell$ possible values, gives $n = \ell^d$ states, and Bellman called this exponential growth the **curse of dimensionality** (Bellman, 1957). Ten bins for each of 6 continuous variables, say the angles and velocities of a three-joint arm, already give $10^6$ states. A dense transition table with 10 actions would then have $10^{13}$ entries. Backgammon has on the order of $10^{20}$ states and Go about $10^{170}$ (Chapter 01, Section 13). DP needs at least one backup per state per sweep, and a table entry per state, so for such problems it is out of the question.
+For a fixed discount factor and accuracy, all of these methods are *polynomial* in the number of states and actions (the LP is polynomial in the input bit size in general). That is vastly better than enumerating the $\lvert\mathcal{A}\rvert^n$ deterministic policies; for the 25-state gridworld of Chapter 01 there are $4^{25} \approx 1.1\times10^{15}$ of them. The trouble is the number of states itself. A state described by $d$ variables, each with $\ell$ possible values, gives $n = \ell^d$ states, and Bellman called this exponential growth the **curse of dimensionality** (Bellman, 1957). Ten bins for each of 6 continuous variables, say the angles and velocities of a three-joint arm, already give $10^6$ states. A dense transition table with 10 actions would then have $10^{13}$ entries. Backgammon has on the order of $10^{20}$ states and Go about $10^{170}$ (Chapter 01, Section 13). DP needs at least one backup per state per sweep, and a table entry per state, so for such problems it is out of the question. The exception is structure that keeps the value function in a small family. With linear dynamics and quadratic rewards (the LQR of Section 11.4), $V$ has $d(d+1)/2$ parameters whatever $d$ is, and the Riccati recursion costs $O(d^3)$ per stage instead of a sweep over $\ell^d$ grid states.
 
 The rest of the course is largely about getting around the curse while keeping the structure of DP:
 
 * **Sample instead of sweep.** Back up only states that experience visits, with sampled rather than expected updates. This removes the need for a model and for full sweeps ([Chapters 04](04-monte-carlo.md)–[06](06-n-step-and-eligibility-traces.md)).
-* **Focus.** Plan only from the current state, as in real-time DP and Monte Carlo tree search ([Chapter 07](07-planning-and-learning-tabular.md)).
+* **Focus.** Spend updates where they matter: on the states that trajectories of the current policy actually visit (trajectory sampling, real-time DP), or only on the current state at decision time (Monte Carlo tree search) ([Chapter 07](07-planning-and-learning-tabular.md)).
 * **Generalise.** Replace the table by a parameterised function, so that one update affects many states ([Chapters 08](08-function-approximation.md)–[12](12-continuous-control-actor-critic.md)). The max-norm contraction is then lost, and much of [Chapter 08](08-function-approximation.md) is about what that costs.
 
 ---
@@ -1079,6 +1199,7 @@ All scripts are in [`code/ch03_dynamic_programming/`](../code/ch03_dynamic_progr
 | [`async_dp.py`](../code/ch03_dynamic_programming/async_dp.py) | five backup orders for asynchronous VI | 8.2 | 2.6 s |
 | [`lp_solution.py`](../code/ch03_dynamic_programming/lp_solution.py) | primal and dual LPs with HiGHS; occupancy measures | 10.3 | 1.7 s |
 | [`finite_horizon.py`](../code/ch03_dynamic_programming/finite_horizon.py) | backward induction for FrozenLake's 100-step limit; attainment check | 11.2, 11.3 | 15.7 s |
+| [`lqr_riccati.py`](../code/ch03_dynamic_programming/lqr_riccati.py) | the Riccati recursion against Monte Carlo, certainty equivalence and the discounted DARE; Chapter 12's $\theta^\ast$; Hewer's PI against Riccati VI; grid VI against $-s^\top Ps$ in 1-D and 2-D; iLQR (Alg. 3.7): exactness on an LQ problem, pendulum swing-up, LQR catch in Pendulum-v1 | 11.4, 11.5, Ex. 15–16 | 29 s |
 | [`exercise_solutions.py`](../code/ch03_dynamic_programming/exercise_solutions.py) | numerical checks for the exercises; Jack's car rental; one-switch PI; PI and VI on $Q$ | Exercises | 1.2 s |
 
 The core of the library is short. Every backup is one matrix–vector product with the model reshaped to $(\lvert\mathcal{S}\rvert\lvert\mathcal{A}\rvert) \times \lvert\mathcal{S}\rvert$. Invalid actions are masked with $-\infty$, so that a `max` can never pick them:
@@ -1128,6 +1249,8 @@ def modified_policy_iteration(mdp, m, tol=1e-6, V0=None, max_iter=10_000_000):
 * **Counting iterations instead of work.** PI's 5 iterations each cost a cubic solve, and VI's thousands of sweeps each cost one sparse product. Which is faster depends on the size, the sparsity and $\gamma$ (Section 12.2).
 * **An LP weight vector with zeros.** The primal LP determines $v_\ast(s)$ only where the occupancy is positive. Use $\mu > 0$ everywhere if you want the whole value function and policy.
 * **Using a stationary policy for a time-limited task.** Under a hard deadline the optimal policy depends on the time left, and a stationary policy can be noticeably worse. The $\gamma = 1$ stationary policy lost 12.6 percentage points on FrozenLake 8×8.
+* **Calling a DARE solver on a discounted problem without rescaling.** SciPy's `solve_discrete_are` solves the undiscounted Riccati equation. For the discounted equation (3.32), pass $\sqrt\gamma F$ and $\sqrt\gamma G$. Otherwise you get the undiscounted $P$, 4% off in the example of Section 11.4, with no warning.
+* **Treating an iLQR solution as a global policy.** iLQR and DDP return a local optimum and a feedback law that is valid near one trajectory. Their result depends on the initial guess: 9 of 10 random initialisations converged to a non-swing-up with a 200-step horizon (Section 11.5). Warm-start them, re-plan (MPC), or try several initialisations.
 
 ---
 
@@ -1140,6 +1263,7 @@ def modified_policy_iteration(mdp, m, tol=1e-6, V0=None, max_iter=10_000_000):
 * **Modified PI and asynchronous DP.** Puterman & Shin ("Modified policy iteration algorithms for discounted Markov decision problems", *Management Science*, 1978) introduced MPI. Scherrer, Ghavamzadeh, Gabillon, Lesner & Geist ("Approximate modified policy iteration and its application to the game of Tetris", *JMLR*, 2015) analysed its approximate version. Bertsekas ("Distributed dynamic programming", *IEEE Transactions on Automatic Control*, 1982) proved convergence of asynchronous, distributed value iteration. Bertsekas & Tsitsiklis developed the theory further in *Parallel and Distributed Computation* (1989), "An analysis of stochastic shortest path problems" (*Mathematics of Operations Research*, 1991) and *Neuro-Dynamic Programming* (1996).
 * **Bounds on greedy policies.** Williams & Baird ("Tight performance bounds on greedy policies based on imperfect value functions", Northeastern University technical report NU-CCS-93-14, 1993) and Singh & Yee ("An upper bound on the loss from approximate optimal-value functions", *Machine Learning*, 1994) gave the bounds of Section 6.3. They became central once value functions were approximated.
 * **Complexity.** Papadimitriou & Tsitsiklis ("The complexity of Markov decision processes", *Mathematics of Operations Research*, 1987) showed that MDPs are P-complete. Littman, Dean & Kaelbling (UAI, 1995) surveyed the running times of MDP algorithms. Ye (*Mathematics of Operations Research*, 2011) proved policy iteration and Dantzig's simplex method strongly polynomial for a fixed discount factor. Hansen, Miltersen & Zwick (*Journal of the ACM*, 2013) improved the bound and extended it to two-player turn-based stochastic games. Fearnley (ICALP, 2010) gave exponential lower bounds for policy iteration under total- and average-reward criteria. Feinberg & Huang (*Operations Research Letters*, 2014) showed that value iteration is not strongly polynomial.
+* **Optimal control.** Kalman solved the linear-quadratic regulator through the Riccati equation ("Contributions to the theory of optimal control", *Boletín de la Sociedad Matemática Mexicana*, 1960) and introduced the Kalman filter the same year ("A new approach to linear filtering and prediction problems", *Journal of Basic Engineering*, 1960). Kleinman (*IEEE Transactions on Automatic Control*, 1968) and Hewer (*IEEE Transactions on Automatic Control*, 1971) gave the policy-iteration, that is Newton, algorithms for the continuous- and discrete-time Riccati equations. Pontryagin, Boltyanskii, Gamkrelidze & Mishchenko presented the maximum principle in *The Mathematical Theory of Optimal Processes* (English translation, Interscience, 1962). Mayne ("A second-order gradient method for determining optimal trajectories of non-linear discrete-time systems", *International Journal of Control*, 1966) and Jacobson & Mayne (*Differential Dynamic Programming*, American Elsevier, 1970) developed DDP, and Li & Todorov (ICINCO 2004) introduced iLQR. Crandall & Lions ("Viscosity solutions of Hamilton–Jacobi equations", *Transactions of the American Mathematical Society*, 1983) made the HJB equation rigorous for non-smooth value functions. Bradtke (NIPS 1992) brought LQR into RL with a Q-function-based policy iteration.
 * **In RL.** Sutton & Barto's Chapter 4 (1998; 2nd ed. 2018) made DP the conceptual base of reinforcement learning and popularised the term generalized policy iteration. Barto, Bradtke & Singh (1995) connected asynchronous DP to learning through real-time DP ([Chapter 07](07-planning-and-learning-tabular.md)).
 
 ---
@@ -1157,6 +1281,7 @@ def modified_policy_iteration(mdp, m, tol=1e-6, V0=None, max_iter=10_000_000):
 * **Generalized policy iteration**, the interplay of evaluation and improvement, is the template for the rest of the course.
 * The **LP view**: $v_\ast$ is the smallest $v$ with $v \ge \mathcal{T}^\ast v$. The dual variables are **discounted occupancy measures**, and vertices are deterministic policies.
 * **Finite horizon**: backward induction is exact in $H$ sweeps, and optimal policies depend on the time left. VI's $k$-th iterate is the optimal $k$-step value.
+* **Continuous states**: with linear dynamics and quadratic rewards, backward induction stays exact. The value is $-s^\top P_t s - c_t$, the optimal policy is linear, and $P_t$ follows the **Riccati recursion**. Noise changes only $c_t$ (**certainty equivalence**), and policy iteration is **Hewer's algorithm**, Newton's method on the DARE. For nonlinear systems, **iLQR/DDP** run the same recursion around a trajectory and find *local* optima. The **HJB equation** is the Bellman equation in continuous time.
 * For fixed $\gamma$ and accuracy, everything is polynomial in $\lvert\mathcal{S}\rvert$ and $\lvert\mathcal{A}\rvert$, but $\lvert\mathcal{S}\rvert$ grows exponentially with the number of state variables: the **curse of dimensionality**. Sampling, focusing and generalisation, the subjects of the coming chapters, are the ways around it.
 
 ## Key equations
@@ -1181,6 +1306,9 @@ def modified_policy_iteration(mdp, m, tol=1e-6, V0=None, max_iter=10_000_000):
 | LP primal / dual | $\min \mu^\top v$ s.t. $v(s) \ge q_v(s,a)$; $\max\sum x\,r$ s.t. $\sum_a x(s',a) - \gamma\sum_{s,a}p(s'\mid s,a)x(s,a) = \mu(s')$ (3.25), (3.26) |
 | occupancy measure | $x_\pi(s,a) = \sum_t\gamma^t\Pr_\pi\lbrace S_t = s, A_t = a\rbrace$ (unnormalised), $\sum_{s,a}x_\pi(s,a)r(s,a) = \mu^\top v_\pi$ (3.27) |
 | backward induction | $V^\ast_H = h$, $V^\ast_t = \mathcal{T}^\ast V^\ast_{t+1}$ (3.28) |
+| Riccati recursion (LQR) | $a^\ast_t = -K_t s$, $K_t = \gamma(C_a + \gamma G^\top P_{t+1}G)^{-1}G^\top P_{t+1}F$; $P_t = C_s + \gamma F^\top P_{t+1}F - \gamma F^\top P_{t+1}GK_t$; $c_t = \gamma(c_{t+1} + \mathrm{tr}(P_{t+1}\Sigma_w))$ (3.30), (3.31) |
+| discounted DARE | $P = C_s + \gamma F^\top PF - \gamma^2F^\top PG(C_a + \gamma G^\top PG)^{-1}G^\top PF$ (3.32) |
+| HJB equation | $\eta V(s) = \max_a\big[r(s,a) + \nabla V(s)^\top f(s,a)\big]$ (3.33) |
 
 ---
 
@@ -1349,6 +1477,40 @@ Input: model r(s,a), p(s'|s,a); γ ∈ [0, 1); tie tolerance tol ≥ 0
 
 </details>
 
+**15. ★★ The discounted Riccati recursion and certainty equivalence.** Consider the LQ problem (3.29), and suppose $V_{t+1}(s) = -s^\top P_{t+1}s - c_{t+1}$ with $P_{t+1} \succeq 0$. (a) Derive (3.30) and (3.31). (b) Show that $P_t \succeq 0$, so that the induction can continue. (c) Show that the gains do not depend on $\Sigma_w$, write $c_0$ as a sum, and find its limit as $H \to \infty$ when $P_t \to P$. (d) Now let the action act through a random gain, $S_{t+1} = FS_t + (G + \Xi_t)A_t + W_t$, where the random matrix $\Xi_t$ has mean zero, is independent of everything else, and satisfies $\mathbb{E}[\Xi_t^\top P\,\Xi_t] = \Lambda(P)$. Show that the quadratic guess still works, and find the new gain. Does certainty equivalence survive?
+
+<details><summary>Solution</summary>
+
+(a) Write $x = Fs + Ga$. Since $W_t$ has mean zero and is independent of $(s,a)$, $\mathbb{E}[(x + W_t)^\top P_{t+1}(x + W_t)] = x^\top P_{t+1}x + \mathbb{E}[W_t^\top P_{t+1}W_t] = x^\top P_{t+1}x + \mathrm{tr}(P_{t+1}\Sigma_w)$. Hence $Q_t(s,a) = -s^\top C_s s - a^\top C_a a - \gamma x^\top P_{t+1}x - \gamma(c_{t+1} + \mathrm{tr}(P_{t+1}\Sigma_w))$. Its gradient in $a$ is $-2C_a a - 2\gamma G^\top P_{t+1}(Fs + Ga)$, and its Hessian is $-2M$ with $M = C_a + \gamma G^\top P_{t+1}G \succ 0$, because $C_a \succ 0$ and $G^\top P_{t+1}G \succeq 0$. Setting the gradient to zero gives $Ma = -\gamma G^\top P_{t+1}Fs$, which is (3.30). Substitute $a = -Ks$ with $K = \gamma M^{-1}G^\top P_{t+1}F$. The coefficient of $-s^\top(\cdot)s$ is $C_s + K^\top C_aK + \gamma(F - GK)^\top P_{t+1}(F - GK) = C_s + \gamma F^\top P_{t+1}F - \gamma F^\top P_{t+1}GK - \gamma K^\top G^\top P_{t+1}F + K^\top MK$. Since $MK = \gamma G^\top P_{t+1}F$, the last term equals $\gamma K^\top G^\top P_{t+1}F$ and cancels the one before it. What remains is $C_s + \gamma F^\top P_{t+1}F - \gamma F^\top P_{t+1}GK$, which is (3.31). The constant is $\gamma(c_{t+1} + \mathrm{tr}(P_{t+1}\Sigma_w))$.
+
+(b) The first form of the coefficient in (a), $C_s + K^\top C_aK + \gamma(F - GK)^\top P_{t+1}(F - GK)$, is a sum of positive semidefinite matrices.
+
+(c) $\Sigma_w$ appears only in the recursion for $c_t$, so $P_t$ and $K_t$ are the same as without noise. Unrolling from $c_H = 0$ gives $c_0 = \sum_{j=1}^{H}\gamma^j\,\mathrm{tr}(P_j\Sigma_w)$, which tends to $\sum_{j\ge1}\gamma^j\,\mathrm{tr}(P\Sigma_w) = \gamma\,\mathrm{tr}(P\Sigma_w)/(1-\gamma)$. In the example of Section 11.4, `lqr_riccati.py` prints $c_0 = 16.137$ for $H = 50$ against the stationary $17.626$. The difference comes from the last few stages, where $P_j$ is still small, and from the tail $j > 50$.
+
+(d) The extra term is $\Xi_t a$, with mean zero and independent of $W_t$, so all cross terms vanish and $Q_t$ gains the term $-\gamma a^\top\Lambda(P_{t+1})a$. $Q_t$ is still a concave quadratic in $a$, and the guess reproduces itself with $K_t = \gamma\big(C_a + \gamma G^\top P_{t+1}G + \gamma\Lambda(P_{t+1})\big)^{-1}G^\top P_{t+1}F$, and $P_t$ given by (3.31) with $C_a$ replaced by $C_a + \gamma\Lambda(P_{t+1})$. The gain now depends on the noise, so certainty equivalence fails. Because $\Lambda \succeq 0$, the noise acts like an extra action cost: the controller becomes more *cautious*, since a large action also injects large noise.
+
+</details>
+
+**16. ★★ The scalar DARE by hand, and Hewer's iteration as Newton's method.** Take Chapter 12's problem, $F = G = c_s = c_a = 1$ and $\gamma = 0.9$. (a) Solve the DARE (3.32) by hand and give $K$. (b) Starting from $K_0 = 0$, carry out two steps of Hewer's algorithm by hand. (c) Write the cost of a gain $K$ as the fixed point of $\phi_K(P) = c_s + c_aK^2 + \gamma(F - GK)^2P$, and let $T(P) = \min_K\phi_K(P)$, so that (3.32) reads $T(P) = P$. Show that one Newton step for $T(P) - P = 0$ from $P_k$ lands exactly on the value of the greedy gain $K_{k+1} = \arg\min_K\phi_K(P_k)$. (d) Why do the $P_k$ decrease monotonically to $P$, and why is the convergence quadratic?
+
+<details><summary>Solution</summary>
+
+(a) $P = 1 + 0.9P - 0.81P^2/(1 + 0.9P)$. Multiply by $1 + 0.9P$: $P + 0.9P^2 = (1 + 0.9P)^2 - 0.81P^2 = 1 + 1.8P$, so $0.9P^2 - 0.8P - 1 = 0$, with roots $1.5884$ and $-0.6995$. Only the nonnegative root is a cost, so $P = 1.5884$ and $K = 0.9P/(1 + 0.9P) = 0.5884$.
+
+(b) The cost of the gain $K$ solves $P = 1 + K^2 + 0.9(1-K)^2P$, so $P_K = (1 + K^2)/(1 - 0.9(1-K)^2)$. It is finite when $0.9(1-K)^2 < 1$. $K_0 = 0$ gives $P_0 = 1/0.1 = 10$. Then $K_1 = 0.9\cdot10/(1 + 9) = 0.9$ and $P_1 = 1.81/(1 - 0.009) = 1.8264$. Next, $K_2 = 0.9\cdot1.8264/(1 + 1.6438) = 0.6218$ and $P_2 = (1 + 0.3866)/(1 - 0.9\cdot0.1431) = 1.5915$. The script continues with $1.588404$ and $1.588403$. The errors $P_k - P$ are $8.41$, $0.238$, $3.1\times10^{-3}$, $6.4\times10^{-7}$ and $2.7\times10^{-14}$. The ratio $e_{k+1}/e_k^2$ settles near $0.067$, the signature of quadratic convergence.
+
+(c) $\phi_K(P)$ is affine in $P$ and strictly convex in $K$, with minimiser $K(P) = \gamma PGF/(c_a + \gamma PG^2)$. By the envelope theorem, $T'(P) = \partial_P\phi_K(P)$ at $K = K(P)$, that is, $T'(P) = \gamma(F - GK(P))^2$. Let $K = K(P_k) = K_{k+1}$. Then $T(P_k) = \phi_K(P_k) = c_s + c_aK^2 + \gamma(F - GK)^2P_k$, and the Newton step is
+
+$$
+P_{k+1} = P_k - \frac{T(P_k) - P_k}{\gamma(F - GK)^2 - 1} = \frac{P_k\big(1 - \gamma(F-GK)^2\big) + c_s + c_aK^2 + \gamma(F-GK)^2P_k - P_k}{1 - \gamma(F - GK)^2} = \frac{c_s + c_aK^2}{1 - \gamma(F - GK)^2},
+$$
+
+which is exactly the evaluation $P_{K_{k+1}}$ of the greedy gain. In the matrix case the envelope theorem gives the derivative $T'(P)[\Delta] = \gamma(F - GK(P))^\top\Delta(F - GK(P))$, and the Newton equation becomes the Lyapunov equation of the greedy gain. This is Hewer's algorithm, and the analogue of "PI is Newton's method" in Section 5.
+
+(d) Monotonicity is the policy improvement theorem in cost form. $P_{k+1}$ is the cost of a gain that is greedy with respect to $P_k$, so $P \le P_{k+1} \le P_k$. Geometrically, $T$ is concave, as a minimum of affine functions, so its tangent at $P_k$ lies above its graph. The tangent therefore crosses the diagonal at a point no smaller than $P$. Quadratic convergence is the usual property of Newton's method at a simple root. Here $T'(P) - 1 = 0.9\cdot0.4116^2 - 1 = -0.848 \ne 0$, because the optimal discounted closed loop is stable, and $T$ is smooth near $P$.
+
+</details>
+
 ---
 
 ## Further reading
@@ -1362,6 +1524,8 @@ Input: model r(s,a), p(s'|s,a); γ ∈ [0, 1); tie tolerance tol ≥ 0
 * **Altman, E. (1999). *Constrained Markov Decision Processes*. Chapman & Hall/CRC.** Develops the occupancy-measure LP of Section 10 into the theory of constrained MDPs, the basis of much safe-RL work ([Chapter 20](20-deep-rl-in-practice.md)).
 * **de Farias, D. P. & Van Roy, B. (2003). "The linear programming approach to approximate dynamic programming." *Operations Research*.** What happens to the primal LP when $v$ is restricted to a linear function class. An early link between DP and function approximation ([Chapter 08](08-function-approximation.md)).
 * **Pardo, F., Tavakoli, A., Levdik, V. & Kormushev, P. (2018). "Time limits in reinforcement learning." ICML.** Why time limits must be treated either as part of the state (Section 11) or as truncation (bootstrap through them), with deep-RL experiments.
+* **Recht, B. (2019). "A tour of reinforcement learning: the view from continuous control." *Annual Review of Control, Robotics, and Autonomous Systems* 2.** LQR as the test case for RL: model-based against model-free methods, sample complexity, and what optimal control already knew. Read it after Sections 11.4–11.5.
+* **Tassa, Y., Erez, T. & Todorov, E. (2012). "Synthesis and stabilization of complex behaviors through online trajectory optimization." IROS.** A practical account of iLQR inside MPC, including the regularisation and line search of Algorithm 3.7.
 
 ---
 

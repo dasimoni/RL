@@ -7,6 +7,8 @@ A self-contained course on reinforcement learning (RL). It starts with the math 
 * **Exercises with full solutions**: concept checks (★), derivations (★★) and coding or open-ended problems (★★★).
 * **History and further reading**: where each idea came from and what to read next.
 
+In numbers: 21 chapters, 191 runnable scripts, 215 figures, 323 exercises with worked solutions, a 600-term glossary and a reading list of about 300 papers.
+
 Notation is fixed course-wide in [NOTATION.md](NOTATION.md). It follows Sutton & Barto (2nd ed.).
 
 ## Chapters

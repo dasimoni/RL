@@ -4,7 +4,7 @@
 
 ## At a glance
 
-Every control method so far has been **value-based**: learn $q_\ast$ (or $q_\pi$), then act greedily or $\varepsilon$-greedily with respect to it. This chapter takes the other road. We write the policy itself as a differentiable function $\pi_{\boldsymbol\theta}(a \mid s)$ and **climb the gradient of its expected return**. The central result, the **policy gradient theorem**, says that this gradient can be estimated from experience alone, without a model and without differentiating the state distribution. From it follow REINFORCE, baselines, actor-critic methods, the advantage function, generalized advantage estimation (GAE), A2C/A3C and IMPALA. Together these are the ancestors of PPO ([Chapter 11](11-trust-regions-and-ppo.md)), SAC ([Chapter 12](12-continuous-control-actor-critic.md)) and the RL used to fine-tune large language models ([Chapter 18](18-rl-for-language-models.md)).
+Every control method so far has been **value-based**: learn $q_\ast$ (or $q_\pi$), then act greedily or $\varepsilon$-greedily with respect to it. This chapter takes the other road. We write the policy itself as a differentiable function $\pi_{\boldsymbol\theta}(a \mid s)$ and **climb the gradient of its expected return**. The central result, the **policy gradient theorem**, says that this gradient can be estimated from experience alone, without a model and without differentiating the state distribution. From it follow REINFORCE, baselines, actor-critic methods, the advantage function, generalized advantage estimation (GAE), A2C/A3C and IMPALA. For contrast, the last section covers policy search *without* the theorem: finite differences, evolution strategies, the cross-entropy method and random search, which perturb the parameters instead of the actions. The gradient-based methods are the ancestors of PPO ([Chapter 11](11-trust-regions-and-ppo.md)), SAC ([Chapter 12](12-continuous-control-actor-critic.md)) and the RL used to fine-tune large language models ([Chapter 18](18-rl-for-language-models.md)).
 
 **Learning objectives.** After this chapter you should be able to:
 
@@ -15,7 +15,8 @@ Every control method so far has been **value-based**: learn $q_\ast$ (or $q_\pi$
 - derive GAE($\gamma,\lambda$) as an exponentially weighted average of $n$-step advantage estimators, and explain its bias–variance trade-off;
 - implement A2C with GAE and vectorized environments, handling termination and truncation correctly, and explain what A3C's parallel actors are for;
 - explain entropy regularization, the Gaussian policy gradient and its $1/\sigma$ problem, and how the deterministic policy gradient arises as the zero-noise limit;
-- state precisely what happens when the $\gamma^t$ factor is dropped (as almost every implementation does), state and prove the compatible function approximation theorem, and describe IMPALA's V-trace correction.
+- state precisely what happens when the $\gamma^t$ factor is dropped (as almost every implementation does), state and prove the compatible function approximation theorem, and describe IMPALA's V-trace correction;
+- derive the Gaussian-smoothing (evolution-strategies) gradient as the score function in *parameter* space, show why antithetic sampling removes the $J(\boldsymbol\theta)$ term, and say when finite differences, ES, CEM or ARS are preferable to REINFORCE or PPO.
 
 **Prerequisites.** MDPs, returns, $v_\pi$, $q_\pi$, the advantage and the discounted occupancy matrix $(\mathbf I-\gamma\mathbf P_\pi)^{-1}$ ([Chapter 01](01-the-rl-problem.md)); Monte Carlo returns ([Chapter 04](04-monte-carlo.md)); TD errors ([Chapter 05](05-temporal-difference.md)); $n$-step returns, $\lambda$-returns and eligibility traces ([Chapter 06](06-n-step-and-eligibility-traces.md)); function approximation and semi-gradient TD ([Chapter 08](08-function-approximation.md)); the score-function gradient estimator, baselines and control variates, entropy, and the PyTorch/Gymnasium basics ([Chapter 00](00-math-toolkit.md), Sections 5–8). [Chapter 09](09-deep-q-learning.md) is useful for contrast but not required.
 
@@ -32,6 +33,7 @@ Every control method so far has been **value-based**: learn $q_\ast$ (or $q_\pi$
 | [`gaussian_policy.py`](../code/ch10_policy_gradients/gaussian_policy.py) | Gaussian score formulas, tanh squashing, REINFORCE on a continuous bandit (with a noiseless-reward control), stochastic vs deterministic gradients | 31 s |
 | [`discount_bias.py`](../code/ch10_policy_gradients/discount_bias.py) | Dropping $\gamma^t$: an MDP where it drives REINFORCE to the worst policy | 3 s |
 | [`vtrace_tabular.py`](../code/ch10_policy_gradients/vtrace_tabular.py) | V-trace converges to the value of the "truncated" policy $\pi_{\bar\rho}$ | 24 s |
+| [`black_box_search.py`](../code/ch10_policy_gradients/black_box_search.py) | Policy search without the theorem: finite differences, SPSA, ES, CEM and ARS against REINFORCE on CartPole; ES gradient variance and convergence against $\dim\boldsymbol\theta$ on exact linear-quadratic problems | 455 s |
 | [`exercise_solutions.py`](../code/ch10_policy_gradients/exercise_solutions.py) | Coding exercises 10.3, 10.11 and 10.12 | 42 s |
 
 **Study time.** About 8–10 hours for the text and derivations, plus 3–5 hours for the code and exercises.
@@ -44,6 +46,8 @@ Notation follows [NOTATION.md](../NOTATION.md). Local conventions and deliberate
 * $\epsilon(s)$ denotes a critic's error $\hat v(s)-v_\pi(s)$ (Sections 7–8). It is not PPO's clipping range.
 * $\mu_{\boldsymbol\theta}(s)$ denotes the **mean** of a Gaussian policy (Sections 2 and 11). Its $\sigma\to0$ limit is the deterministic policy $\mu_{\boldsymbol\theta}$ of Section 11.3, so the clash with NOTATION.md is intended.
 * Advantage *estimates* are written $\hat A_t$. The plain $A_t$ is always the action at time $t$. $\log$ is the natural logarithm.
+* $\tau$ denotes a trajectory (Section 4.3), as in [Chapter 00](00-math-toolkit.md), Section 6.2. It is never a temperature or a Polyak coefficient in this chapter.
+* In Section 15, $d=\dim\boldsymbol\theta$, $\boldsymbol\xi\sim\mathcal N(\mathbf 0,\mathbf I_d)$ is a standard normal vector in *parameter* space (as $\xi$ is in action space in Section 11.1), and $\sigma$ is the scale of the parameter perturbation, not a Gaussian policy's standard deviation. $K$ there is a feedback gain, as in [Chapter 03](03-dynamic-programming.md), Section 11.4.
 
 ---
 
@@ -74,6 +78,8 @@ Both deterministic choices are infinitely bad. With $p=1$ the agent shuttles bet
 2. **Variance.** The gradient is estimated from returns, which are noisy. Most of this chapter is about reducing that noise: reward-to-go, baselines, critics, GAE.
 3. **Sample efficiency.** The basic estimators are **on-policy**: each batch of data is used for one gradient step and then thrown away, because after the step it was generated by the wrong policy. Value-based methods with replay ([Chapter 09](09-deep-q-learning.md)) reuse data many times. Off-policy actor-critics (Section 14 and [Chapter 12](12-continuous-control-actor-critic.md)) and PPO's multiple epochs per batch ([Chapter 11](11-trust-regions-and-ppo.md)) are partial remedies.
 4. **Step sizes.** A gradient step that is reasonable in parameter space can be enormous in policy space. Fixing this is the topic of [Chapter 11](11-trust-regions-and-ppo.md).
+
+Section 15 describes the oldest alternative, which needs no policy gradient theorem. Black-box search perturbs the parameters instead of the actions. Its variance grows with the number of parameters rather than with the horizon, and smoothing the objective by the perturbations can step over small local optima.
 
 ---
 
@@ -1081,7 +1087,7 @@ computed backwards by $v_s-V(S_s)=\rho_s\delta_s+\gamma c_s\big(v_{s+1}-V(S_{s+1
   \tag{10.35}
   $$
 
-  which is $\pi$ when $\bar\rho=\infty$ and moves towards $b$ as $\bar\rho$ shrinks.
+  which is $\pi$ when $\bar\rho\ge\max_a\pi(a\mid s)/b(a\mid s)$ (in particular when $\bar\rho=\infty$) and moves towards $b$ as $\bar\rho$ shrinks.
 
 [Chapter 06](06-n-step-and-eligibility-traces.md), Section 14.4, derives this fixed point. In one line: at $V=v_{\pi_{\bar\rho}}$ every correction term has conditional mean $\mathbb E_b[\rho_t\delta_t\mid S_t]\propto\sum_a\pi_{\bar\rho}(a\mid S_t)\big(q_V(S_t,a)-V(S_t)\big)=0$, by the Bellman equation of $\pi_{\bar\rho}$.
 
@@ -1136,6 +1142,175 @@ V-trace thus trades a known, controllable bias, towards the behavior policy, for
 
 ---
 
+## 15. Policy search without the policy gradient theorem: finite differences, evolution strategies and random search
+
+Every method in this chapter so far injects its exploration noise into the **actions** and uses the score $\nabla\log\pi(A_t\mid S_t)$ to credit each action with what followed. An older family ignores the structure of the MDP altogether. It treats the expected episodic return $J(\boldsymbol\theta)$ as a black-box function of the parameters, perturbs the **parameters** themselves, runs whole episodes and compares their returns. It needs no score function, no backpropagation, no value function and not even the Markov property. The policy may be deterministic and non-differentiable, and the evaluations are independent, so the work parallelizes trivially. The price is a gradient estimate whose variance grows with the number of parameters $d=\dim\boldsymbol\theta$ instead of with the horizon. These methods remain strong baselines: linear policies trained by random search are competitive on the MuJoCo locomotion benchmarks (Section 15.4).
+
+### 15.1 Finite differences and SPSA
+
+The most direct estimator perturbs one coordinate at a time. **Central finite differences** use
+
+$$
+\frac{\partial J}{\partial\theta_i}\approx\frac{\hat J(\boldsymbol\theta+h\mathbf e_i)-\hat J(\boldsymbol\theta-h\mathbf e_i)}{2h},\qquad i=1,\dots,d,
+$$
+
+where $\hat J$ is the return of one episode (or the mean of a few). Inside a stochastic-approximation loop this is the Kiefer–Wolfowitz (1952) scheme ([Chapter 00](00-math-toolkit.md), Historical notes). Two details matter in RL. First, $\hat J$ is noisy and the noise is divided by $h$. Running both members of a pair with the **same environment seed** (*common random numbers*) cancels most of the noise from the start state and the transitions, as long as the two policies behave alike. Second, one gradient costs $2d$ episodes. That is cheap for CartPole's four parameters and hopeless for a network with $10^5$ weights.
+
+**SPSA** (simultaneous perturbation stochastic approximation; Spall, 1992) perturbs all coordinates at once, along a random direction $\boldsymbol\Delta\in\lbrace-1,+1\rbrace^d$ with independent fair signs:
+
+$$
+\hat{\mathbf g}=\frac{\hat J(\boldsymbol\theta+c\boldsymbol\Delta)-\hat J(\boldsymbol\theta-c\boldsymbol\Delta)}{2c}\,\boldsymbol\Delta .
+$$
+
+By Taylor expansion the difference quotient is $\boldsymbol\Delta^\top\nabla J+O(c^2)$, and $\mathbb E[\boldsymbol\Delta\boldsymbol\Delta^\top]=\mathbf I$. So $\mathbb E\hat{\mathbf g}=\nabla J+O(c^2)$ from **two** episodes, whatever $d$ is. The components of $\nabla J$ along the other $d-1$ directions do not vanish; they become noise. That trade, fewer evaluations per estimate for more variance per estimate, runs through the rest of this section.
+
+### 15.2 Gaussian smoothing: the score function in parameter space
+
+Replace the random signs by a Gaussian, and the objective by its smoothed version
+
+$$
+J_\sigma(\boldsymbol\theta)\doteq\mathbb E_{\boldsymbol\xi}\big[J(\boldsymbol\theta+\sigma\boldsymbol\xi)\big],\qquad\boldsymbol\xi\sim\mathcal N(\mathbf 0,\mathbf I_d).
+$$
+
+The perturbed vector $\tilde{\boldsymbol\theta}=\boldsymbol\theta+\sigma\boldsymbol\xi$ is a sample from the **search distribution** $\mathcal N(\boldsymbol\theta,\sigma^2\mathbf I)$. Its score with respect to the mean is $(\tilde{\boldsymbol\theta}-\boldsymbol\theta)/\sigma^2=\boldsymbol\xi/\sigma$. The score-function estimator of [Chapter 00](00-math-toolkit.md), Section 6.2, then gives
+
+$$
+\nabla J_\sigma(\boldsymbol\theta)=\frac1\sigma\,\mathbb E\big[J(\boldsymbol\theta+\sigma\boldsymbol\xi)\,\boldsymbol\xi\big]
+\tag{10.37}
+$$
+
+(Nesterov & Spokoiny, 2017, analyse optimization with this gradient-free oracle). This is REINFORCE with a single "action" per episode. The action is the whole parameter vector, drawn once before the episode starts, and the reward is the episode's return. If $J$ is differentiable, Stein's lemma (Section 11.1) turns (10.37) into $\nabla J_\sigma=\mathbb E[\nabla J(\boldsymbol\theta+\sigma\boldsymbol\xi)]$, an average of true gradients that tends to $\nabla J$ as $\sigma\to0$ (Exercise 10.14). But (10.37) never uses $\nabla J$. It still works when $J$ jumps as $\boldsymbol\theta$ changes, as it does for a deterministic policy with discrete actions, because $J_\sigma$ is smooth even then.
+
+**Baselines and antithetic pairs.** Because $\mathbb E[\boldsymbol\xi]=\mathbf 0$, any constant may be subtracted from $J$ in (10.37) without bias, exactly as in Section 6.1. Not subtracting one is costly. The one-sample estimator $J(\boldsymbol\theta+\sigma\boldsymbol\xi)\boldsymbol\xi/\sigma$ contains the term $J(\boldsymbol\theta)\boldsymbol\xi/\sigma$. It has mean zero and total variance $dJ(\boldsymbol\theta)^2/\sigma^2$: the baseline error of Section 11.1, amplified by $1/\sigma$, now in all $d$ coordinates. The standard cure evaluates each $\boldsymbol\xi$ in both directions:
+
+$$
+\nabla J_\sigma(\boldsymbol\theta)=\frac1{2\sigma}\,\mathbb E\Big[\big(J(\boldsymbol\theta+\sigma\boldsymbol\xi)-J(\boldsymbol\theta-\sigma\boldsymbol\xi)\big)\boldsymbol\xi\Big].
+\tag{10.38}
+$$
+
+The difference cancels $J(\boldsymbol\theta)$ and every even-order term of the Taylor expansion. On a quadratic the antithetic estimator is exactly $(\nabla J^\top\boldsymbol\xi)\boldsymbol\xi$, with total variance $(d+1)\lVert\nabla J\rVert^2$ (Exercise 10.15). That factor $d+1$ is the irreducible cost of probing a $d$-dimensional gradient along one random direction at a time. It is why black-box methods scale with $\dim\boldsymbol\theta$. The relative variance of REINFORCE has no such explicit factor of $d$. It grows instead with the horizon (a sum of $T$ scores, Section 6) and with the action dimension.
+
+**Fitness shaping.** Following Wierstra et al. (2014), Salimans et al. (2017) replace the $2N$ returns of a batch by their **centred ranks**, evenly spaced values in $[-\tfrac12,\tfrac12]$. The update becomes invariant to any increasing transformation of the returns, and a single outlier episode can no longer dominate a step. Because the ranks sum to zero, they also act as a baseline. The price is that the step no longer estimates (10.37) exactly; it follows a rank-based utility instead.
+
+**What changes when the noise moves into parameter space.** One perturbation is held for a whole episode, so exploration is consistent over time. [Chapter 14](14-exploration.md), Sections 2 and 11, discusses the same idea for gradient-based agents (parameter-space noise; Plappert et al., 2018). Only the total return enters, so, as Salimans et al. stress, ES is invariant to the action frequency (frame-skip) and to delayed rewards, and tolerates very long horizons without discounting. The other side of the same coin is that ES throws away the temporal structure the rest of this chapter exploits. Every action of an episode gets the same credit, as in total-return REINFORCE before reward-to-go (Section 6), and there is no critic to bootstrap from.
+
+```text
+Algorithm 10.9  Antithetic evolution strategies with centred-rank fitness shaping (OpenAI-ES style)
+Input:  initial theta in R^d; noise scale sigma; pairs N; step size alpha (or an Adam optimizer)
+loop:
+    for i = 1..N (in parallel, one worker per pair):
+        xi_i ~ N(0, I_d);  choose an environment seed s_i
+        F_i+ <- return of one episode of the policy theta + sigma*xi_i, seed s_i
+        F_i- <- return of one episode of the policy theta - sigma*xi_i, seed s_i    # common random numbers
+    u <- centred ranks of the 2N returns (F_1+..F_N+, F_1-..F_N-), spread evenly over [-1/2, 1/2]
+    g <- (1 / (2 N sigma)) * sum_i (u_i+ - u_i-) * xi_i                              # (10.38) on ranks
+    theta <- theta + alpha * g          (OpenAI-ES: an Adam step on g, plus weight decay)
+```
+
+### 15.3 Adapting the search distribution: NES, CMA-ES, PGPE and CEM
+
+Algorithm 10.9 keeps the covariance of the search distribution fixed at $\sigma^2\mathbf I$. **Natural evolution strategies** (NES; Wierstra, Schaul, Glasmachers, Sun, Peters & Schmidhuber, 2014) treat the mean *and* the covariance as parameters $\boldsymbol\phi$ of the search distribution. They estimate $\nabla_{\boldsymbol\phi}\mathbb E_{\tilde{\boldsymbol\theta}\sim p_{\boldsymbol\phi}}[J(\tilde{\boldsymbol\theta})]$ with the score function and follow the **natural gradient** $\mathbf F_{\boldsymbol\phi}^{-1}\nabla_{\boldsymbol\phi}$, the steepest-ascent direction when distances between search distributions are measured by the KL divergence ([Chapter 11](11-trust-regions-and-ppo.md), Section 5). For the mean of $\mathcal N(\boldsymbol\theta,\sigma^2\mathbf I)$ the Fisher matrix is $\mathbf I/\sigma^2$, so the natural gradient is just $\sigma^2$ times (10.37). Fixed-covariance ES is NES with the covariance frozen. Once the covariance adapts, the natural gradient matters, because it makes the update independent of how the covariance is parameterized.
+
+**CMA-ES** (covariance matrix adaptation; Hansen & Ostermeier, 2001) is the heavily engineered practical relative. It uses rank-based weights, a full covariance matrix updated from successful steps and from an "evolution path" of recent mean shifts, and separate step-size control. Its $O(d^2)$ covariance limits it to at most a few thousand parameters, but within that range it is among the most reliable black-box optimizers. It trained the small linear controller of World Models ([Chapter 13](13-model-based-rl.md), Section 7.2). **PGPE** (parameter-exploring policy gradients; Sehnke, Osendorfer, Rückstieß, Graves, Peters & Schmidhuber, 2010) reached the same estimator from the RL side. It is a likelihood-ratio gradient with respect to the mean and per-parameter standard deviations of a Gaussian over policy parameters, with symmetric sampling and a baseline. Its stated motivation is the variance of per-step action noise.
+
+The **cross-entropy method** needs no gradient at all. It samples $N$ parameter vectors from $\mathcal N(\mathbf m,\operatorname{diag}\mathbf v)$, runs an episode with each, and refits $\mathbf m$ and $\mathbf v$ to the $K$ best. This is the elite refit of Algorithm 13.2, applied once per batch of episodes to policy parameters instead of at every time step to action sequences. Left alone, the elite variance can shrink faster than the mean improves, and the search stalls before it reaches a good policy. Szita & Lőrincz (2006) fixed this for Tetris by adding noise to the variance at every refit, decreasing over time. Cross-entropy search over the weights of a linear evaluation function then remained the method to beat on Tetris for years; approximate dynamic programming only caught up later (Gabillon, Ghavamzadeh & Scherrer, NIPS 2013).
+
+Replace the hard elite cut by soft weights and you obtain the **reward-weighted** family that dominated episodic robot learning. The new mean is a weighted average of the sampled parameters, $\mathbf m\leftarrow\sum_iw_i\tilde{\boldsymbol\theta}_i/\sum_iw_i$, with weights that increase with the return. RWR (reward-weighted regression; Peters & Schaal, 2007) uses a transformed reward. PoWER (Kober & Peters, NIPS 2008) is an expectation-maximization method that learned ball-in-a-cup on a real Barrett WAM arm. PI² (Theodorou, Buchli & Schaal, 2010) derives exponentiated-cost weights $w_i\propto\exp(-\text{cost}_i/\lambda)$ from path-integral stochastic optimal control. The policies were **dynamical movement primitives** (DMPs; Ijspeert, Nakanishi, Hoffmann, Pastor & Schaal, 2013): stable attractor dynamics whose shape is set by a few dozen weights per joint. This keeps $d$ small and makes episodic parameter perturbation efficient. MPPI ([Chapter 13](13-model-based-rl.md), Section 4.3) is the action-sequence counterpart of these updates.
+
+### 15.4 Random search with linear policies: ARS
+
+Mania, Guy & Recht (2018) asked how far the plainest version of (10.38) goes. **Basic random search** takes antithetic steps along random directions, without rank shaping. **Augmented random search** (ARS) adds three cheap fixes:
+
+* it divides the step by the standard deviation $\sigma_R$ of the returns used in it, an adaptive step size;
+* it normalizes states by a running mean and standard deviation (the "V2" variants);
+* it updates only along the $b$ of $N$ directions with the highest $\max(r^+,r^-)$ (the "-t" variants).
+
+With **static linear policies**, ARS matched the sample efficiency of the best deep RL methods of the time on the MuJoCo locomotion benchmarks, at a computational cost at least 15 times lower than the fastest competing model-free methods. The authors' larger point was about evaluation. Across many seeds and hyperparameters the spread of outcomes was large, and a benchmark that random search over linear policies solves says little about deep RL ([Chapter 20](20-deep-rl-in-practice.md)).
+
+```text
+Algorithm 10.10  Augmented Random Search, V2-t (Mania, Guy & Recht, 2018)
+Input:  step size alpha; noise nu; directions N; top-b <= N
+Initialise: M <- 0 (linear policy, dim(A) x dim(S));  mu <- 0, Sigma <- I (running state statistics)
+loop:
+    sample delta_1..delta_N, each the shape of M with i.i.d. N(0,1) entries
+    for k = 1..N (in parallel):
+        r_k+ <- return of one episode with a = (M + nu*delta_k) diag(Sigma)^(-1/2) (s - mu)
+        r_k- <- return of one episode with a = (M - nu*delta_k) diag(Sigma)^(-1/2) (s - mu)
+    keep the b directions with the largest max(r_k+, r_k-)
+    sigma_R <- standard deviation of the 2b returns kept
+    M <- M + alpha / (b * sigma_R) * sum over kept k of (r_k+ - r_k-) * delta_k
+    update mu, Sigma with all states visited in this iteration
+```
+
+### 15.5 Scale: OpenAI-ES, deep neuroevolution and quality-diversity
+
+Salimans, Ho, Chen, Sidor & Sutskever (2017) showed that Algorithm 10.9 scales to deep networks and more than a thousand CPU cores. The key is communication. All workers share the random seeds, so each can regenerate every other worker's $\boldsymbol\xi_i$, and they exchange only **scalar returns**, never gradient vectors. With 1,440 workers, ES solved the MuJoCo 3D humanoid task in about 10 minutes, and one hour of training gave results competitive with A3C on most Atari games. Such, Madhavan, Conti, Lehman, Stanley & Clune (2017) dropped the gradient estimate altogether. A simple **genetic algorithm** (Gaussian mutations and truncation selection, without crossover) evolved Atari networks with over four million parameters. It beat DQN, A3C or ES on some games and lost on others, and it stored each individual as a list of seeds.
+
+Populations also make it natural to search for *diversity*, not return alone. **Novelty search** (Lehman & Stanley, 2011) rewards behaviour unlike anything in an archive of past behaviours and ignores the objective entirely. It solves deceptive mazes in which climbing the return leads into a dead end. **MAP-Elites** (Mouret & Clune, 2015) keeps an archive with the best solution found in each cell of a grid over behaviour descriptors. This "quality-diversity" idea of an archive of cells reappears in Go-Explore ([Chapter 14](14-exploration.md), Section 9).
+
+### 15.6 What the numbers say
+
+[`black_box_search.py`](../code/ch10_policy_gradients/black_box_search.py) runs two experiments.
+
+**CartPole with a linear policy.** The deterministic policy $a=\mathbb 1[\boldsymbol\theta^\top s>0]$ has $d=4$ parameters. It starts at $\boldsymbol\theta=\mathbf 0$, which fails after about 9 steps. Each method gets 640 training episodes on each of 5 seeds. The black-box settings were set once, not tuned per method: perturbation scale 0.1 and Adam with step size 0.05 for finite differences, SPSA and ES (8 pairs); 16 samples, 4 elites and extra variance 0.01 for CEM; $N=8$, $b=4$, $\nu=0.1$, $\alpha=0.05$ for ARS. Perturbed pairs share an environment seed. For reference, REINFORCE trains a *stochastic* logistic policy $\pi(\text{right}\mid s)=1/(1+e^{-\boldsymbol\theta^\top s})$ with the same 4 parameters (reward-to-go, learned linear baseline, step size 0.1, the best of four tried), and the MLP of Section 6.4. Every 16 training episodes the current policy is evaluated on 10 fixed episodes that do not count towards the budget.
+
+| method | episodes per update | training episodes until the evaluation averages $\ge475$: median (per seed) | env steps until then (median) | final evaluation return (mean of 5 seeds) |
+|---|---|---|---|---|
+| finite differences | 8 | 32 (48, 32, 32, 32, 32) | 6.4k | 500 |
+| SPSA | 2 | 32 (16, 16, 32, 32, 160) | 7.8k | 500 |
+| antithetic ES + ranks (Alg. 10.9) | 16 | 144 (112, 144, 192, 304, 112) | 30.2k | 500 |
+| CEM | 16 | 80 (48, 176, 112, 48, 80) | 20.9k | 499 |
+| ARS V2-t (Alg. 10.10) | 16 | 32 (32, 16, 32, 32, 32) | 2.6k | 500 |
+| REINFORCE, linear logistic policy | 1 | 160 (192, 160, 128, 160, 160) | 31.0k | 492 |
+| REINFORCE, 2×64 MLP + baseline (Section 6.4) | 1 | 208 (160, 128, 224, 208, 240) | 36.6k | 414 (one seed collapsed to 138) |
+
+(Final return: mean of the last 5 checkpoints. Resolution: 16 episodes.) Every black-box method found a linear policy that balances for the full 500 steps and, apart from brief dips, kept it (CEM, ARS and SPSA fell below 475 at 5%, 2% and 1% of the later checkpoints). Finite differences, SPSA and ARS needed a median of 32 training episodes, against 160 for REINFORCE with the same four parameters. Do not over-read this. CartPole with a linear policy is easy for parameter search: 1.8% of random $\boldsymbol\theta\sim\mathcal N(\mathbf 0,\mathbf I)$ already average $\ge475$ over 5 episodes, so pure random sampling would need about 55 draws. This is exactly the kind of benchmark Mania et al. warn about. Two observations do carry over. First, at $d=4$ the methods that spend the fewest episodes per step win; ES, built for many parallel workers, was the slowest of the five when episodes are counted one by one. Second, the black-box methods optimize a *deterministic* policy, while REINFORCE's stochastic policy still drops below 475 at 37% of the later checkpoints.
+
+![Black-box search vs REINFORCE on CartPole](../code/ch10_policy_gradients/figures/black_box_cartpole.png)
+
+**Scaling with $d$: a family of linear-quadratic problems.** To isolate the estimator, the second experiment uses problems whose $J$ and $\nabla J$ are known exactly. The dynamics are $S_{t+1}=FS_t+GA_t$ with $A_t=-KS_t$, reward $-(S_t^\top S_t+A_t^\top A_t)$, $\gamma=0.9$ and $S_0\sim\mathcal N(\mathbf 0,\mathbf I/n)$, with $F=0.9\times$(a random orthogonal matrix) and $G=\mathbf I$ in $n=2,4,8,16$ dimensions. The parameters are $\boldsymbol\theta=\operatorname{vec}K$, so $d=n^2$ ranges from 4 to 256. $J(K)=-\operatorname{tr}(P_K\Sigma_0)$, where $P_K$ solves a Lyapunov equation, as in the LQR of [Chapter 03](03-dynamic-programming.md), Section 11.4 (and [Chapter 12](12-continuous-control-actor-critic.md), Section 2.6, for the scalar case). Because $J$ is exact, the only randomness is the search noise $\boldsymbol\xi$. By the symmetry of this family, exact gradient ascent behaves identically for every $n$: with its best step it reaches 1% suboptimality in **one** iteration, because the gradient at $K=0$ points straight at $K^\ast$. Every extra iteration below is the price of estimating the gradient.
+
+*Per-sample variance* at $K=0$, $\sigma=0.01$, as $\operatorname{tr}\operatorname{Cov}(\hat{\mathbf g})/\lVert\nabla J\rVert^2$ from 20,000 samples:
+
+| $d$ | plain $J(\boldsymbol\theta+\sigma\boldsymbol\xi)\boldsymbol\xi/\sigma$ | theory $\frac{dJ^2}{\sigma^2\lVert\nabla J\rVert^2}+d+1$ | forward, $J(\boldsymbol\theta)$ subtracted | antithetic (10.38) | $d+1$ |
+|---|---|---|---|---|---|
+| 4 | 2,262 | 2,240 | 5.21 | 5.02 | 5 |
+| 16 | 18,090 | 17,900 | 17.9 | 17.5 | 17 |
+| 64 | 144,500 | 143,000 | 68.9 | 65.8 | 65 |
+| 256 | 1,166,000 | 1,150,000 | 346 | 271 | 257 |
+
+The plain estimator matches the theory to within 1–2%. Subtracting $J(\boldsymbol\theta)$, by one extra evaluation or by antithetic pairs, removes a factor of about $J^2/(\sigma^2\lVert\nabla J\rVert^2)$. That factor is 450 at $d=4$ and 4,300 at $d=256$, because in this family $\lVert\nabla J\rVert^2$ halves each time $n$ doubles. What remains grows like $d+1$. At $d=64$, shrinking $\sigma$ from 0.01 to 0.003 and 0.001 multiplies the plain variance by 11 and 99 (to $1.6\times10^6$ and $1.4\times10^7$), as $1/\sigma^2$ predicts, while the antithetic one stays at 65–66.
+
+*Convergence.* Each method now does gradient ascent with 16 evaluations of $J$ per iteration: 8 antithetic pairs; 15 forward perturbations plus $J(\boldsymbol\theta)$; or 16 plain samples. Each method's step size is the best on a factor-2 grid, tuned on separate seeds (six, or three for plain; the worst tuning seed decides, so that the chosen step does not diverge). The table gives iterations to reach 1% suboptimality, $(J^\ast-J)/(J^\ast-J(0))\le0.01$, median over 5 seeds, with the median suboptimality after 3,000 iterations in parentheses:
+
+| $d$ | exact gradient | antithetic | forward | plain |
+|---|---|---|---|---|
+| 4 | 1 | 12 ($3\times10^{-8}$) | 7 ($3\times10^{-5}$) | not reached on 3 of 5 seeds (0.039) |
+| 16 | 1 | 27 ($4\times10^{-8}$) | 15 ($8\times10^{-5}$) | not reached (0.26) |
+| 64 | 1 | 71 ($1\times10^{-7}$) | 43 ($2\times10^{-3}$) | not reached (0.52) |
+| 256 | 1 | 277 ($6\times10^{-7}$) | 358 ($6\times10^{-3}$) | not reached (0.93) |
+
+Three lessons follow. (i) The cost of a gradient-free gradient grows with $d$. From $d=64$ to $d=256$ the antithetic method needs 3.9 times as many iterations, close to the factor 4 in $d+1$. (ii) Without a baseline nothing works. Plain ES must take steps small enough to survive its enormous variance, and at $d=256$ it closes only 7% of the gap in 48,000 evaluations. (iii) Forward differences spend 15 of their 16 evaluations on new directions, against 8 for antithetic pairs, and with exact $J$ they are faster for $d\le64$. But their curvature term does not cancel, so their noise does not vanish at the optimum. They stall at a suboptimality of $3\times10^{-5}$ to $6\times10^{-3}$, and at $d=256$ that floor is close enough to the 1% target to make them slower. With noisy episode returns, antithetic pairs that share a seed also cancel most of the episode noise, which a single shared evaluation of $J(\boldsymbol\theta)$ cannot do.
+
+![Gradient variance and convergence against d for plain, forward and antithetic ES on linear-quadratic problems](../code/ch10_policy_gradients/figures/black_box_lq.png)
+
+### 15.7 When to use which
+
+| | Black-box search (FD, SPSA, ES, CEM, ARS) | REINFORCE and actor-critic (this chapter) | PPO ([Chapter 11](11-trust-regions-and-ppo.md)) |
+|---|---|---|---|
+| Noise injected into | parameters, once per episode | actions, at every step | actions, at every step |
+| Variance grows with | $d=\dim\boldsymbol\theta$ | horizon, action dimension, return noise | the same, reduced by a critic and GAE |
+| Needs | episode returns only | $\nabla\log\pi$ and backpropagation | $\nabla\log\pi$, a critic, backpropagation |
+| Policy may be | deterministic, non-differentiable, any program | stochastic and differentiable | stochastic and differentiable |
+| Per-step credit assignment | none | reward-to-go; critic in actor-critic | critic with GAE |
+| Parallelism | trivial; workers exchange scalars | batches of episodes | vectorized environments, minibatches |
+| Reuse of data | none | none (on-policy) | several epochs per batch |
+| Good fit | small or structured policies, long horizons, delayed or sparse rewards, non-differentiable simulators or policies, cheap massive parallelism | small problems, teaching, a baseline | large networks, dense rewards, limited samples |
+
+The approaches also combine. A black-box outer loop can tune a few hyperparameters, or a low-dimensional controller on top of features learned by gradient methods (the World Models controller of [Chapter 13](13-model-based-rl.md) is an example).
+
+---
+
 ## In code
 
 All scripts live in [`code/ch10_policy_gradients/`](../code/ch10_policy_gradients/). Each runs from the repository root, fixes its seeds, prints its settings and a results summary, and accepts `--quick` for a smoke test that writes no figures. The folder's [README](../code/ch10_policy_gradients/README.md) lists the same information with the headline numbers.
@@ -1150,6 +1325,7 @@ python code/ch10_policy_gradients/a2c_parallel_actors.py    # Section 9.5
 python code/ch10_policy_gradients/gaussian_policy.py        # Sections 2, 11
 python code/ch10_policy_gradients/discount_bias.py          # Section 12
 python code/ch10_policy_gradients/vtrace_tabular.py         # Section 14
+python code/ch10_policy_gradients/black_box_search.py       # Section 15
 python code/ch10_policy_gradients/exercise_solutions.py     # Exercises 10.3, 10.11, 10.12
 ```
 
@@ -1164,6 +1340,7 @@ python code/ch10_policy_gradients/exercise_solutions.py     # Exercises 10.3, 10
 | [`gaussian_policy.py`](../code/ch10_policy_gradients/gaussian_policy.py) | 4 s | 31 s | $\sigma\to0.023$ and gradient norm 0.11→0.37 without entropy bonus; noiseless rewards: $J=-0.0008$, gradient norm 0.009; at $\sigma=0.01$ score-function variance 4061 (no baseline), 3.9 (exact baseline), 52 (exact baseline, noisy reward) vs 1.08 deterministic |
 | [`discount_bias.py`](../code/ch10_policy_gradients/discount_bias.py) | 0.4 s | 3 s | with $\gamma^t$: all 100 runs reach $p\ge0.989$ (optimal); without: 94/100 runs end at $p<0.5$ (pessimal side) |
 | [`vtrace_tabular.py`](../code/ch10_policy_gradients/vtrace_tabular.py) | 1 s | 24 s | V-trace matches $v_{\pi_{\bar\rho}}$ to 0.006–0.025 in all 5 settings; at $\bar\rho=1$ it is 0.43 away from $v_\pi$ |
+| [`black_box_search.py`](../code/ch10_policy_gradients/black_box_search.py) | QUICK s | 455 s | linear CartPole policy: FD, SPSA and ARS evaluate $\ge475$ after a median of 32 training episodes, CEM 80, ES 144, REINFORCE 160 (linear) and 208 (MLP); 1.8% of random $\boldsymbol\theta$ already do. Exact LQ, $d=4\to256$: per-sample variance$/\lVert\nabla J\rVert^2$ plain $2262\to1.2\times10^6$, antithetic $5.0\to271$ ($\approx d+1$); antithetic ES needs 12→277 iterations to 1%, plain never gets there (median) |
 | [`exercise_solutions.py`](../code/ch10_policy_gradients/exercise_solutions.py) | 3 s | 42 s | zero-variance optimal baseline; keeping $\gamma^t$ slows CartPole learning in episodes 201–300 (3/3 seeds); aliased one-step actor-critic drifts to $p=0.986$ |
 
 `tabular_pg.py` is a small shared module (exact $v_\pi$, $q_\pi$, $\eta_\gamma$, the theorem's gradient, finite differences, episode sampling) imported by the tabular scripts. `plot_style.py` holds the figure style. Runtimes were measured on one core of a shared 4-core machine (PyTorch limited to one thread). Expect some variation.
@@ -1199,6 +1376,7 @@ python code/ch10_policy_gradients/exercise_solutions.py     # Exercises 10.3, 10
 * **Deep actor-critics**: **Mnih et al. (2016, ICML)** introduced A3C. **Schulman, Moritz, Levine, Jordan & Abbeel (2016, ICLR)** introduced GAE. The synchronous A2C variant was popularized by OpenAI's Baselines release (2017). **Espeholt et al. (2018, ICML)** introduced IMPALA and V-trace, building on Retrace (**Munos, Stepleton, Harutyunyan & Bellemare, 2016, NIPS**). Off-policy policy gradients go back to the Off-PAC algorithm of **Degris, White & Sutton (2012, ICML)**. **Imani, Graves & White (2018, NeurIPS)** derived the exact off-policy policy gradient theorem, which needs emphatic state weightings.
 * **The discount-factor mismatch** was pointed out by **Thomas (2014, ICML)** for natural actor-critics and analysed in general by **Nota & Thomas (2020, AAMAS)**.
 * **Theory of policy gradients** advanced quickly after 2019. **Agarwal, Kakade, Lee & Mahajan (2021, *JMLR*)** proved global convergence of exact tabular softmax policy gradient and gave rates for natural policy gradient, and **Mei, Xiao, Szepesvári & Schuurmans (2020, ICML)** proved an $O(1/t)$ rate for softmax policy gradient ([Chapter 11](11-trust-regions-and-ppo.md) compares it with the natural gradient). Empirical studies of what deep policy gradients really do include **Ilyas et al. (2020, ICLR)** and **Andrychowicz et al. (2021, ICLR)**.
+* **Black-box policy search** is older than the policy gradient theorem. Gradient-free stochastic approximation goes back to Kiefer & Wolfowitz (1952). Evolution strategies were developed by Rechenberg (1973) and Schwefel in the 1960s and 1970s. **Spall (1992, *IEEE Transactions on Automatic Control*)** introduced SPSA. **Hansen & Ostermeier (2001, *Evolutionary Computation*)** introduced CMA-ES, and **Wierstra, Schaul, Glasmachers, Sun, Peters & Schmidhuber (2014, *JMLR*)** gave natural evolution strategies their definitive form. **Nesterov & Spokoiny (2017, *Foundations of Computational Mathematics*)** analysed Gaussian-smoothing gradient estimators. In RL, **Szita & Lőrincz (2006, *Neural Computation*)** played Tetris with a noisy cross-entropy method, and **Sehnke et al. (2010, *Neural Networks*)** introduced PGPE. Robot learning used reward-weighted episodic search: RWR (**Peters & Schaal, 2007, ICML**), PoWER (**Kober & Peters, NIPS 2008**) and PI² (**Theodorou, Buchli & Schaal, 2010, *JMLR***), over dynamical movement primitives (**Ijspeert, Nakanishi, Hoffmann, Pastor & Schaal, 2013, *Neural Computation***). Deep RL rediscovered the family with OpenAI-ES (**Salimans, Ho, Chen, Sidor & Sutskever, 2017**), the Deep GA (**Such et al., 2017**) and ARS (**Mania, Guy & Recht, 2018, NeurIPS**). **Lehman & Stanley (2011, *Evolutionary Computation*)** introduced novelty search, and **Mouret & Clune (2015)** introduced MAP-Elites.
 
 ---
 
@@ -1214,7 +1392,8 @@ python code/ch10_policy_gradients/exercise_solutions.py     # Exercises 10.3, 10
 * **Gaussian policies** have scores of order $1/\sigma$, so baseline errors and return noise are amplified as $\sigma$ shrinks; only a critic or the deterministic gradient removes the return noise. The expected Gaussian gradient is an averaged action-gradient (Stein's lemma), whose $\sigma\to0$ limit is the **deterministic policy gradient**.
 * Dropping $\gamma^t$ produces an update that is, in general, not the gradient of any function. It can even converge to the worst policy, though with $\gamma$ near 1 it approximates the average-reward gradient.
 * A **compatible** critic, linear in $\nabla\log\pi$, gives the exact gradient, approximates the advantage, and its weights are the **natural gradient**.
-* **IMPALA** decouples acting from learning. **V-trace** corrects the resulting policy lag with truncated importance weights, and converges to the value of the policy $\pi_{\bar\rho}$, which lies between $b$ and $\pi$.
+* **IMPALA** decouples acting from learning. **V-trace** corrects the resulting policy lag with truncated importance weights, and converges to the value of the truncated policy $\pi_{\bar\rho}\propto\min(\bar\rho b,\pi)$. This policy equals $\pi$ when $\bar\rho\ge\max_a\pi(a\mid s)/b(a\mid s)$ and moves towards $b$ as $\bar\rho$ shrinks. With more than two actions it need not be a mixture of $b$ and $\pi$ ([Chapter 06](06-n-step-and-eligibility-traces.md), Section 14.4).
+* **Black-box policy search** perturbs the parameters instead of the actions and needs only episode returns. Gaussian smoothing gives $\nabla J_\sigma=\frac1\sigma\mathbb E[J(\boldsymbol\theta+\sigma\boldsymbol\xi)\boldsymbol\xi]$, the score function of the search distribution. Antithetic pairs remove the $J(\boldsymbol\theta)$ term, whose variance $dJ^2/\sigma^2$ otherwise swamps everything, and leave $(d+1)\lVert\nabla J\rVert^2$ on a quadratic. The cost therefore grows with $\dim\boldsymbol\theta$, not with the horizon. On exact linear-quadratic problems, antithetic ES needed 12 iterations to reach 1% at $d=4$ and 277 at $d=256$, while plain ES barely moved. ES, CEM, NES/CMA-ES and ARS allow deterministic, non-differentiable policies and parallelize with scalar communication, but they ignore per-step credit. On CartPole a linear policy found by finite differences, SPSA or ARS balanced for 500 steps after a median of 32 episodes, a sign of how easy that benchmark is.
 
 ---
 
@@ -1239,6 +1418,10 @@ python code/ch10_policy_gradients/exercise_solutions.py     # Exercises 10.3, 10
 | No-$\gamma^t$ estimator's mean | $\sum_s\eta_1(s)\sum_aq_\pi(s,a)\nabla\pi(a\mid s)$ |
 | Compatible critic, natural gradient | $\nabla_{\mathbf w}f_{\mathbf w}=\nabla\log\pi\ \Rightarrow\ \nabla J\propto\mathbb E[f_{\mathbf w}\nabla\log\pi]$, $\ \mathbf w\propto\mathbf F^{-1}\nabla J$ |
 | V-trace | $v_s=V(S_s)+\sum_{t\ge s}\gamma^{t-s}\big(\prod_{i=s}^{t-1}c_i\big)\rho_t\delta_t$, fixed point $v_{\pi_{\bar\rho}}$, $\ \pi_{\bar\rho}\propto\min(\bar\rho b,\pi)$ |
+| SPSA | $\hat{\mathbf g}=\dfrac{\hat J(\boldsymbol\theta+c\boldsymbol\Delta)-\hat J(\boldsymbol\theta-c\boldsymbol\Delta)}{2c}\boldsymbol\Delta$, $\ \boldsymbol\Delta\in\lbrace\pm1\rbrace^d$ |
+| Gaussian smoothing (ES) | $J_\sigma(\boldsymbol\theta)=\mathbb E[J(\boldsymbol\theta+\sigma\boldsymbol\xi)]$, $\ \nabla J_\sigma=\frac1\sigma\mathbb E[J(\boldsymbol\theta+\sigma\boldsymbol\xi)\boldsymbol\xi]=\frac1{2\sigma}\mathbb E\big[(J(\boldsymbol\theta+\sigma\boldsymbol\xi)-J(\boldsymbol\theta-\sigma\boldsymbol\xi))\boldsymbol\xi\big]$ |
+| ES variance on a quadratic | plain: $\operatorname{tr}\operatorname{Cov}=dJ^2/\sigma^2+(d+1)\lVert\nabla J\rVert^2+(d+2)J\operatorname{tr}\mathbf H+O(\sigma^2)$; $\ $ antithetic: $(d+1)\lVert\nabla J\rVert^2$ |
+| ARS step | $M\leftarrow M+\dfrac{\alpha}{b\,\sigma_R}\sum_{k\in\text{top }b}(r_k^+-r_k^-)\boldsymbol\delta_k$ |
 
 ---
 
@@ -1256,11 +1439,11 @@ python code/ch10_policy_gradients/exercise_solutions.py     # Exercises 10.3, 10
 
 </details>
 
-**Exercise 10.2 ★ (Why not a softmax over action values?).** In the aliased corridor, an agent uses $\pi(a)\propto e^{\hat q(a)/\tau}$ with action values $\hat q(\text{R}),\hat q(\text{L})$ learned by Monte Carlo under its own policy, shared across the three look-alike states, and a fixed temperature $\tau$. Explain why such an agent will in general not converge to $p^\ast=0.586$, while a softmax over *free preferences* trained by REINFORCE does.
+**Exercise 10.2 ★ (Why not a softmax over action values?).** In the aliased corridor, an agent uses $\pi(a)\propto e^{\hat q(a)/\kappa}$ with action values $\hat q(\text{R}),\hat q(\text{L})$ learned by Monte Carlo under its own policy, shared across the three look-alike states, and a fixed temperature $\kappa$. Explain why such an agent will in general not converge to $p^\ast=0.586$, while a softmax over *free preferences* trained by REINFORCE does.
 
 <details><summary>Solution</summary>
 
-The action values of the aliased agent are averages, over the three states it cannot distinguish, of what each action led to. They answer "which action is better on average?", not "which probability maximizes $J$?". The resulting probability $p=\sigma\big((\hat q(\text{R})-\hat q(\text{L}))/\tau\big)$ is determined by the value gap and an arbitrary $\tau$. Nothing ties it to the stationary point of $J(p)$, and with $\tau\to0$ the agent becomes deterministic, which is infinitely bad here. In contrast, REINFORCE adjusts the preference $\theta$ along $dJ/d\theta$, whose only zero in $(0,1)$ is $p^\ast$ (Section 4.4 and the short-corridor experiment, where REINFORCE with baseline ends at $p=0.578\pm0.059$). Preferences are free parameters, not estimates of anything, so they can settle wherever the gradient vanishes.
+The action values of the aliased agent are averages, over the three states it cannot distinguish, of what each action led to. They answer "which action is better on average?", not "which probability maximizes $J$?". The resulting probability $p=\sigma\big((\hat q(\text{R})-\hat q(\text{L}))/\kappa\big)$ is determined by the value gap and an arbitrary $\kappa$. Nothing ties it to the stationary point of $J(p)$, and with $\kappa\to0$ the agent becomes deterministic, which is infinitely bad here. In contrast, REINFORCE adjusts the preference $\theta$ along $dJ/d\theta$, whose only zero in $(0,1)$ is $p^\ast$ (Section 4.4 and the short-corridor experiment, where REINFORCE with baseline ends at $p=0.578\pm0.059$). Preferences are free parameters, not estimates of anything, so they can settle wherever the gradient vanishes.
 
 </details>
 
@@ -1398,6 +1581,37 @@ Keeping the factor made learning slower in the middle phase (episodes 201–300)
 
 </details>
 
+**Exercise 10.14 ★★ (The smoothed gradient).** Let $J:\mathbb R^d\to\mathbb R$ be bounded and $J_\sigma(\boldsymbol\theta)=\mathbb E[J(\boldsymbol\theta+\sigma\boldsymbol\xi)]$ with $\boldsymbol\xi\sim\mathcal N(\mathbf 0,\mathbf I_d)$. (a) Write $J_\sigma$ as an integral against the density of $\mathcal N(\boldsymbol\theta,\sigma^2\mathbf I)$ and derive (10.37). Where, if anywhere, did you use differentiability of $J$? (b) Suppose $J$ is differentiable with an $L$-Lipschitz gradient. Show that $\nabla J_\sigma(\boldsymbol\theta)=\mathbb E[\nabla J(\boldsymbol\theta+\sigma\boldsymbol\xi)]$ and $\lVert\nabla J_\sigma(\boldsymbol\theta)-\nabla J(\boldsymbol\theta)\rVert\le L\sigma\sqrt d$, so that $\nabla J_\sigma\to\nabla J$ as $\sigma\to0$. (c) In one dimension, take the step $J(\theta)=\mathbb 1[\theta>0]$. Compute $J_\sigma$ and $J_\sigma'(0)$. What happens as $\sigma\to0$, and what does this say about ES with the deterministic CartPole policy of Section 15.6?
+
+<details><summary>Solution</summary>
+
+(a) $J_\sigma(\boldsymbol\theta)=\int J(\mathbf u)\,\varphi_\sigma(\mathbf u-\boldsymbol\theta)\,d\mathbf u$, with $\varphi_\sigma(\mathbf z)=(2\pi\sigma^2)^{-d/2}e^{-\lVert\mathbf z\rVert^2/2\sigma^2}$. Only the density depends on $\boldsymbol\theta$, and $\nabla_{\boldsymbol\theta}\varphi_\sigma(\mathbf u-\boldsymbol\theta)=\varphi_\sigma(\mathbf u-\boldsymbol\theta)\,(\mathbf u-\boldsymbol\theta)/\sigma^2$. Differentiation under the integral is allowed because $J$ is bounded and $\lVert\mathbf u-\boldsymbol\theta\rVert\varphi_\sigma$ is integrable. It gives $\nabla J_\sigma=\mathbb E\big[J(\tilde{\boldsymbol\theta})(\tilde{\boldsymbol\theta}-\boldsymbol\theta)/\sigma^2\big]$ with $\tilde{\boldsymbol\theta}\sim\mathcal N(\boldsymbol\theta,\sigma^2\mathbf I)$. Substituting $\tilde{\boldsymbol\theta}=\boldsymbol\theta+\sigma\boldsymbol\xi$ gives (10.37). Differentiability of $J$ was never used: $J_\sigma$ is infinitely differentiable for any bounded measurable $J$. The smoothness comes from the Gaussian, as in the score-function derivation of REINFORCE, where it came from the policy.
+
+(b) Differentiate $\mathbb E[J(\boldsymbol\theta+\sigma\boldsymbol\xi)]$ inside the expectation. This is allowed because a Lipschitz gradient grows at most linearly, which is integrable against a Gaussian. The result is $\nabla J_\sigma(\boldsymbol\theta)=\mathbb E[\nabla J(\boldsymbol\theta+\sigma\boldsymbol\xi)]$, Stein's lemma of Section 11.1 in $d$ dimensions. Then
+$\lVert\nabla J_\sigma-\nabla J\rVert=\big\lVert\mathbb E[\nabla J(\boldsymbol\theta+\sigma\boldsymbol\xi)-\nabla J(\boldsymbol\theta)]\big\rVert\le\mathbb E\big[L\sigma\lVert\boldsymbol\xi\rVert\big]\le L\sigma\sqrt{\mathbb E\lVert\boldsymbol\xi\rVert^2}=L\sigma\sqrt d$,
+by Jensen's inequality. The bias grows like $\sqrt d$. In high dimension $\sigma$ must therefore be small to keep the bias small, and a small $\sigma$ is exactly what makes the plain estimator's $dJ^2/\sigma^2$ term explode. This is one more reason for the antithetic form.
+
+(c) $J_\sigma(\theta)=\Pr(\theta+\sigma\xi>0)=\Phi(\theta/\sigma)$, so $J_\sigma'(0)=\phi(0)/\sigma=1/(\sigma\sqrt{2\pi})$, where $\Phi$ and $\phi$ are the standard normal distribution function and density. (10.37) gives the same: $\frac1\sigma\mathbb E[\xi\,\mathbb 1[\xi>0]]=\phi(0)/\sigma$. As $\sigma\to0$ the slope blows up, while $J$ itself has derivative 0 everywhere except at the jump, where it has none. A pathwise gradient through a deterministic step is zero almost everywhere and useless. The smoothed gradient "sees" the jump from a distance of order $\sigma$ and points to the better side. The return of the CartPole policy $a=\mathbb 1[\boldsymbol\theta^\top s>0]$ changes by jumps as $\boldsymbol\theta$ crosses the hyperplanes where some action along the trajectory flips. A smoothed gradient such as (10.37) is therefore what makes gradient-style search on this policy possible at all, and $\sigma$ sets the scale over which the jumps are smoothed.
+
+</details>
+
+**Exercise 10.15 ★★ (Antithetic sampling on a quadratic).** Let $J(\boldsymbol\theta+\mathbf z)=J+\mathbf g^\top\mathbf z+\tfrac12\mathbf z^\top\mathbf H\mathbf z$ exactly, with $J=J(\boldsymbol\theta)$, $\mathbf g=\nabla J(\boldsymbol\theta)$ and $\mathbf H$ symmetric. Consider the plain estimator $\hat{\mathbf g}_1=J(\boldsymbol\theta+\sigma\boldsymbol\xi)\boldsymbol\xi/\sigma$ and the antithetic estimator $\hat{\mathbf g}_2=\big(J(\boldsymbol\theta+\sigma\boldsymbol\xi)-J(\boldsymbol\theta-\sigma\boldsymbol\xi)\big)\boldsymbol\xi/2\sigma$. (a) Show that both are unbiased for $\mathbf g$. (b) Show that $\hat{\mathbf g}_2=(\mathbf g^\top\boldsymbol\xi)\boldsymbol\xi$ and $\operatorname{tr}\operatorname{Cov}(\hat{\mathbf g}_2)=(d+1)\lVert\mathbf g\rVert^2$. Use $\mathbb E[\xi_i\xi_j\lVert\boldsymbol\xi\rVert^2]=(d+2)\delta_{ij}$. (c) Show that $\operatorname{tr}\operatorname{Cov}(\hat{\mathbf g}_1)=dJ^2/\sigma^2+(d+1)\lVert\mathbf g\rVert^2+(d+2)J\operatorname{tr}\mathbf H+O(\sigma^2)$. (d) An antithetic pair costs two evaluations. Compare it with the mean of two plain samples, using the $d=64$ row of the variance table in Section 15.6.
+
+<details><summary>Solution</summary>
+
+(a) $\hat{\mathbf g}_1=\frac J\sigma\boldsymbol\xi+(\mathbf g^\top\boldsymbol\xi)\boldsymbol\xi+\frac\sigma2(\boldsymbol\xi^\top\mathbf H\boldsymbol\xi)\boldsymbol\xi$. The odd moments of $\boldsymbol\xi$ vanish, so $\mathbb E[\boldsymbol\xi]=\mathbf 0$ and $\mathbb E[(\boldsymbol\xi^\top\mathbf H\boldsymbol\xi)\boldsymbol\xi]=\mathbf 0$, while $\mathbb E[(\mathbf g^\top\boldsymbol\xi)\boldsymbol\xi]=\mathbb E[\boldsymbol\xi\boldsymbol\xi^\top]\mathbf g=\mathbf g$. In $\hat{\mathbf g}_2$ the even terms ($J$ and the quadratic) are equal at $\pm\sigma\boldsymbol\xi$ and cancel, which leaves the expression in (b), with mean $\mathbf g$. (For a quadratic, smoothing only adds the constant $\tfrac{\sigma^2}2\operatorname{tr}\mathbf H$, so $\nabla J_\sigma=\nabla J$ and there is no smoothing bias either.)
+
+(b) $\hat{\mathbf g}_2=\frac{2\sigma\,\mathbf g^\top\boldsymbol\xi}{2\sigma}\boldsymbol\xi=(\mathbf g^\top\boldsymbol\xi)\boldsymbol\xi$. The identity holds because $\mathbb E[\xi_i^2\lVert\boldsymbol\xi\rVert^2]=\mathbb E\xi_i^4+\sum_{k\ne i}\mathbb E[\xi_i^2\xi_k^2]=3+(d-1)=d+2$, and the off-diagonal terms are odd. Hence $\mathbb E\lVert\hat{\mathbf g}_2\rVert^2=\sum_{ij}g_ig_j\mathbb E[\xi_i\xi_j\lVert\boldsymbol\xi\rVert^2]=(d+2)\lVert\mathbf g\rVert^2$. Subtracting $\lVert\mathbb E\hat{\mathbf g}_2\rVert^2=\lVert\mathbf g\rVert^2$ gives $(d+1)\lVert\mathbf g\rVert^2$, whatever $\sigma$ and $\mathbf H$ are.
+
+(c) Expand $\mathbb E\lVert\hat{\mathbf g}_1\rVert^2$. The cross terms $2\frac J\sigma\mathbb E[(\mathbf g^\top\boldsymbol\xi)\lVert\boldsymbol\xi\rVert^2]$ and $\sigma\,\mathbb E[(\mathbf g^\top\boldsymbol\xi)(\boldsymbol\xi^\top\mathbf H\boldsymbol\xi)\lVert\boldsymbol\xi\rVert^2]$ are odd and vanish. What remains is
+$\frac{J^2}{\sigma^2}\mathbb E\lVert\boldsymbol\xi\rVert^2+\mathbb E[(\mathbf g^\top\boldsymbol\xi)^2\lVert\boldsymbol\xi\rVert^2]+J\,\mathbb E[(\boldsymbol\xi^\top\mathbf H\boldsymbol\xi)\lVert\boldsymbol\xi\rVert^2]+\frac{\sigma^2}4\mathbb E[(\boldsymbol\xi^\top\mathbf H\boldsymbol\xi)^2\lVert\boldsymbol\xi\rVert^2]$
+$=\frac{dJ^2}{\sigma^2}+(d+2)\lVert\mathbf g\rVert^2+(d+2)J\operatorname{tr}\mathbf H+O(\sigma^2)$,
+using $\mathbb E[(\boldsymbol\xi^\top\mathbf H\boldsymbol\xi)\lVert\boldsymbol\xi\rVert^2]=\sum_{ij}H_{ij}(d+2)\delta_{ij}$. Subtract $\lVert\mathbf g\rVert^2$. For small $\sigma$ the first term dominates: the plain estimator is worse by a factor of about $J^2/(\sigma^2\lVert\mathbf g\rVert^2)$, which has nothing to do with the gradient and everything to do with the missing baseline.
+
+(d) At $d=64$ the measured values, relative to $\lVert\nabla J\rVert^2$, are $1.445\times10^5$ for one plain sample and 65.8 for one antithetic pair. Two plain samples average to $7.2\times10^4$, which is about 1,100 times the antithetic pair's variance at the same cost. The theory gives $\frac{dJ^2/\sigma^2+(d+1)\lVert\nabla J\rVert^2}{2(d+1)\lVert\nabla J\rVert^2}$ with $J=-3.69$, $\lVert\nabla J\rVert^2=60.8$ and $\sigma=0.01$, which is about 1,100 as well.
+
+</details>
+
 ---
 
 ## Further reading
@@ -1407,6 +1621,9 @@ Keeping the factor made learning slower in the middle phase (episodes 201–300)
 * **Sutton, McAllester, Singh & Mansour (2000), "Policy gradient methods for reinforcement learning with function approximation".** Short and clear. It contains the theorem in both episodic and average-reward form, compatible features, and the first convergence result for policy iteration with function approximation.
 * **Greensmith, Bartlett & Baxter (2004), "Variance reduction techniques for gradient estimates in reinforcement learning".** The definitive analysis of baselines and actor-critic variance.
 * **Peters & Schaal (2008), "Reinforcement learning of motor skills with policy gradients" (*Neural Networks*).** A practitioner-friendly survey of likelihood-ratio methods, optimal baselines and natural actor-critic in robotics.
+* **Salimans, Ho, Chen, Sidor & Sutskever (2017), "Evolution strategies as a scalable alternative to reinforcement learning" (arXiv:1703.03864).** Antithetic ES with rank shaping, the shared-seed trick, and a clear discussion of when parameter-space noise beats action-space noise (Section 15).
+* **Mania, Guy & Recht (2018), "Simple random search of static linear policies is competitive for reinforcement learning" (NeurIPS).** ARS, and a sobering look at seed variance and what the MuJoCo benchmarks measure.
+* **Hansen (2016), "The CMA evolution strategy: a tutorial" (arXiv:1604.00772).** The standard reference for CMA-ES, from its author.
 * **Schulman, Moritz, Levine, Jordan & Abbeel (2016), "High-dimensional continuous control using generalized advantage estimation".** The GAE paper. Its discussion of $\gamma$ and $\lambda$ as two different bias–variance knobs is essential.
 * **Mnih et al. (2016), "Asynchronous methods for deep reinforcement learning", and Espeholt et al. (2018), "IMPALA".** The two architectures of Sections 9 and 14, including V-trace's proofs in IMPALA's appendix.
 * **Nota & Thomas (2020), "Is the policy gradient a gradient?"** A careful, readable analysis of the $\gamma^t$ issue of Section 12.

@@ -14,6 +14,7 @@ python code/ch10_policy_gradients/a2c_parallel_actors.py
 python code/ch10_policy_gradients/gaussian_policy.py
 python code/ch10_policy_gradients/discount_bias.py
 python code/ch10_policy_gradients/vtrace_tabular.py
+python code/ch10_policy_gradients/black_box_search.py
 python code/ch10_policy_gradients/exercise_solutions.py
 ```
 
@@ -28,6 +29,7 @@ python code/ch10_policy_gradients/exercise_solutions.py
 | `gaussian_policy.py` | Gaussian/tanh scores, continuous bandit, SF vs deterministic variance (2, 11) | 4 s | 31 s | $\sigma\to0.023$ and gradient norm 0.11→0.37 without entropy bonus; noiseless-reward control: $J=-0.0008$, gradient norm 0.009; at $\sigma=0.01$ score-function variance 4061 (no baseline), 3.9 (exact baseline, noise-free $q$), 52 (exact baseline, noisy reward) vs 1.08 deterministic |
 | `discount_bias.py` | dropping gamma^t drives REINFORCE to the worst policy (12) | 0.4 s | 3 s | with $\gamma^t$: all 100 runs reach $p\ge0.989$ (optimal); without: 94/100 runs end at $p<0.5$ (pessimal side) |
 | `vtrace_tabular.py` | V-trace fixed point v_{pi_rho_bar} (14) | 1 s | 24 s | V-trace matches $v_{\pi_{\bar\rho}}$ to 0.006–0.025 in all 5 settings; at $\bar\rho=1$ it is 0.43 away from $v_\pi$ |
+| `black_box_search.py` | policy search without the policy gradient theorem: finite differences, SPSA, antithetic ES, CEM, ARS vs REINFORCE; ES gradient variance and convergence against $d=\dim\theta$ (15) | QUICK s | 455 s | CartPole, linear policy ($d=4$), 5 seeds: training episodes until the evaluation averages $\ge475$ (median) FD 32, SPSA 32, ARS 32, CEM 80, ES 144, REINFORCE 160 (linear) / 208 (MLP); 1.8% of random $\theta\sim\mathcal N(0,I)$ already do. Exact LQ family, $d=4,16,64,256$: tr Cov$/\lVert\nabla J\rVert^2$ plain 2262 / 18090 / 144500 / 1166000 vs antithetic 5.0 / 17.5 / 65.8 / 271 ($\approx d+1$); iterations to 1% suboptimality: antithetic 12 / 27 / 71 / 277, forward differences 7 / 15 / 43 / 358, exact gradient 1, plain not reached (median) |
 | `exercise_solutions.py` | coding exercises 10.3, 10.11, 10.12 | 3 s | 42 s | zero-variance optimal baseline; keeping $\gamma^t$ slows CartPole learning in episodes 201–300 (3/3 seeds); aliased one-step actor-critic drifts to $p=0.986$ |
 
 Runtimes were measured on one core of a shared 4-core machine (Python 3.11, numpy 2.4, torch 2.14 CPU, gymnasium 1.3). Expect some variation.
@@ -43,6 +45,7 @@ Figures produced in full mode:
 - `figures/gaussian_policy.png`
 - `figures/discount_bias.png`
 - `figures/vtrace_tabular.png`
+- `figures/black_box_cartpole.png`, `figures/black_box_lq.png` (black_box_search.py)
 - `figures/exercise_corridor_ac.png` (exercise_solutions.py)
 
 Helper modules (no `__main__`, not run by the smoke tests):
@@ -52,8 +55,9 @@ Helper modules (no `__main__`, not run by the smoke tests):
 
 Notes
 
-- `exercise_solutions.py` imports `reinforce_cartpole.py` and `short_corridor.py`, and `a2c_parallel_actors.py` imports `a2c_gae_cartpole.py`. Run it from the repository root as shown, so that Python puts the script's folder on `sys.path`.
+- `exercise_solutions.py` imports `reinforce_cartpole.py` and `short_corridor.py`, `a2c_parallel_actors.py` imports `a2c_gae_cartpole.py`, and `black_box_search.py` imports `reinforce_cartpole.py` (for its MLP REINFORCE reference; the black-box methods themselves are NumPy only). Run it from the repository root as shown, so that Python puts the script's folder on `sys.path`.
 - The REINFORCE and A2C scripts use a frozen NumPy copy of the policy network to choose actions during rollouts, which is much faster than a per-step PyTorch call. Gradients are always computed by PyTorch on the whole batch, with the same weights.
 - `a2c_gae_cartpole.py` uses Gymnasium's `SAME_STEP` autoreset mode and bootstraps from `info["final_obs"]` on truncation (not on termination).
 - `reinforce_cartpole.py` sums each episode's per-step policy-gradient terms and divides by the **constant** 500 (the time limit). Dividing by the episode's own length (`.mean()`) is not a rescaling: it reweights episodes by $1/T$ and, for the total-return variant, turns the update into the gradient of $\mathbb E[G_0/T]$, which rewards short episodes (chapter Section 5.4 and Pitfall 7). `--mean-loss` reproduces that bug for comparison and writes no figure.
 - As in nearly all implementations, `reinforce_cartpole.py` and `a2c_gae_cartpole.py` drop the $\gamma^t$ factor of the exact discounted policy gradient (chapter Section 12). `discount_bias.py` and Exercise 10.11 show what that changes.
+- `black_box_search.py`: the black-box methods use one deterministic linear policy $a=\mathbb 1[\theta^\top s>0]$, start at $\theta=0$, and share settings that were set once (perturbation scale 0.1, Adam step 0.05; CEM 16 samples, 4 elites, extra variance 0.01; ARS $N=8$, $b=4$, $\nu=0.1$, $\alpha=0.05$). Pairs of perturbed episodes share an environment seed. The linear-quadratic part computes $J$ and $\nabla J$ exactly (Smith doubling for the Lyapunov sums, checked against finite differences to $10^{-10}$), so its only randomness is the search noise. Each step size is the best on a factor-2 grid, tuned on separate seeds (six for antithetic and forward, three for plain), and the worst tuning seed decides.

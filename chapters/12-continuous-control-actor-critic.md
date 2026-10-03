@@ -12,6 +12,8 @@ This chapter is about the family that gets both: **off-policy actor-critic metho
 * **TD3** (2018) diagnoses DDPG's main disease, **overestimation** of $Q$ that the actor then exploits, and fixes it with three small changes.
 * **SAC** (2018) changes the objective to **maximum-entropy RL**. The policy becomes a stochastic, reparameterized tanh-Gaussian, and a temperature is tuned automatically. SAC became the default off-policy algorithm for continuous control.
 
+Two further pieces place SAC in a wider family. Max-ent RL is approximate inference in a graphical model (§5.7). SAC's closed-form improvement step, a reference distribution times an exponentiated value, is shared with KL-regularized policy search from robot learning (REPS, reward-weighted regression, MPO; §9) and with several methods in other chapters.
+
 **Learning objectives.** After this chapter you should be able to:
 
 1. Explain why $\max_a Q(s,a)$ is the obstacle in continuous action spaces, and list the four ways around it.
@@ -21,6 +23,7 @@ This chapter is about the family that gets both: **off-policy actor-critic metho
 5. Define the maximum-entropy objective, soft value functions and the soft Bellman equations; prove soft policy evaluation, soft policy improvement and the convergence of soft policy iteration; derive the Boltzmann form of the soft-optimal policy.
 6. Derive SAC's losses, including the reparameterized actor gradient, the tanh change-of-variables correction and the dual objective for automatic temperature tuning.
 7. Compare DDPG, TD3, SAC and PPO, and place the recent high-update-ratio methods (REDQ, DroQ, CrossQ, TD7, resets, BRO, SimBa) in context.
+8. Read max-ent RL as inference: derive the soft backups as backward messages, explain why exact inference is optimistic about the dynamics, and show that the max-ent objective is the evidence lower bound. Derive episodic REPS (primal, convex dual, weighted-ML M-step), relate it to RWR and MPO, and place SAC, natural-gradient, AWR, MPPI and RLHF updates on the common template "reference × exp(value / temperature)".
 
 **Prerequisites.** The reparameterization and score-function estimators ([Chapter 00, §6](00-math-toolkit.md)); KL divergence, Gibbs' inequality, forward vs reverse KL ([Chapter 00, §5](00-math-toolkit.md)); terminated vs truncated ([Chapter 00, §8.2](00-math-toolkit.md)); Bellman equations and contractions ([Chapters 01](01-the-rl-problem.md) and [03](03-dynamic-programming.md)); maximization bias and Double Q-learning ([Chapter 05, §11](05-temporal-difference.md)); the deadly triad ([Chapter 08](08-function-approximation.md)); DQN's replay buffer and target network ([Chapter 09](09-deep-q-learning.md)); the policy gradient theorem and actor-critic ([Chapter 10](10-policy-gradients.md)); PPO for comparison ([Chapter 11](11-trust-regions-and-ppo.md)).
 
@@ -37,10 +40,11 @@ This chapter is about the family that gets both: **off-policy actor-critic metho
 | `tanh_squash_check.py` | the tanh log-prob correction against a Monte Carlo density estimate | 9–11 s |
 | `sac.py` | SAC from scratch (twin Q, tanh-Gaussian, automatic temperature) on Pendulum-v1, 3 seeds; overlays TD3 and DDPG | 4.5–5.5 min |
 | `sac_temperature.py` | fixed $\alpha\in\{0.01,0.1,1,10\}$ vs automatic tuning | 6–7 min |
+| `episodic_reps.py` | episodic REPS (dual solved numerically, KL checked) vs reward-weighted regression, CEM and parameter-space ES on a two-link reaching task with DMP parameters (§9.5) | 2.5 min |
 
-**Notation for this chapter.** We follow [NOTATION.md](../NOTATION.md), with the departures flagged here, all made to match the deep-RL papers. A deterministic policy is $\mu_{\boldsymbol\theta}(s)$. The critic is written $Q_{\mathbf w}(s,a)$ rather than $\hat q(s,a,\mathbf w)$, and target-network weights carry a bar: $\bar{\mathbf w}$, $\bar{\boldsymbol\theta}$. States lie in $\mathbb R^{d_{\mathcal S}}$, actions in $\mathbb R^{d_{\mathcal A}}$, and $\boldsymbol\theta\in\mathbb R^{d_\theta}$. $\Pi$ denotes a *class of policies*, not the projection operator of NOTATION.md. Several symbols need care. **$\tau$ is the Polyak averaging coefficient** throughout, never a temperature. **$\alpha$ is the entropy temperature** of maximum-entropy RL, as in the SAC papers and NOTATION.md. Because $\alpha$ is taken, learning rates in this chapter are written $\eta$ ($\eta_Q$, $\eta_\pi$, $\eta_\alpha$), a deliberate departure from the course-wide $\alpha$. Soft (entropy-augmented) value functions are written $q^{\mathrm{soft}}_\pi$ and $v^{\mathrm{soft}}_\pi$. Standard-normal noise for reparameterization is $\xi$ (as in Chapter 00). The mean and standard deviation of a Gaussian policy are $m_{\boldsymbol\theta}(s)$ and $\sigma_{\boldsymbol\theta}(s)$, because $\mu$ is reserved for the deterministic policy. $d^\mu$ is the **normalized** discounted state distribution, as in Chapter 11. A baseline is $b(s)$ (one argument, as in [Chapter 10](10-policy-gradients.md)), while $b(a\mid s)$ (two arguments) is the behaviour policy. $c$ is TD3's noise clip and $\kappa_r$ a reward scale.
+**Notation for this chapter.** We follow [NOTATION.md](../NOTATION.md), with the departures flagged here, all made to match the deep-RL papers. A deterministic policy is $\mu_{\boldsymbol\theta}(s)$. The critic is written $Q_{\mathbf w}(s,a)$ rather than $\hat q(s,a,\mathbf w)$, and target-network weights carry a bar: $\bar{\mathbf w}$, $\bar{\boldsymbol\theta}$. States lie in $\mathbb R^{d_{\mathcal S}}$, actions in $\mathbb R^{d_{\mathcal A}}$, and $\boldsymbol\theta\in\mathbb R^{d_\theta}$. $\Pi$ denotes a *class of policies*, not the projection operator of NOTATION.md. Several symbols need care. **$\tau$ is the Polyak averaging coefficient** throughout, never a temperature. **$\alpha$ is the entropy temperature** of maximum-entropy RL, as in the SAC papers and NOTATION.md. Because $\alpha$ is taken, learning rates in this chapter are written $\eta$ ($\eta_Q$, $\eta_\pi$, $\eta_\alpha$), a deliberate departure from the course-wide $\alpha$. In §9 only, $\eta$ without a subscript is the temperature of REPS, RWR and MPO, as in their papers, and $\eta_\gamma$ (in §5.1) is Chapter 10's discounted visit count. Soft (entropy-augmented) value functions are written $q^{\mathrm{soft}}_\pi$ and $v^{\mathrm{soft}}_\pi$. Standard-normal noise for reparameterization is $\xi$ (as in Chapter 00). The mean and standard deviation of a Gaussian policy are $m_{\boldsymbol\theta}(s)$ and $\sigma_{\boldsymbol\theta}(s)$, because $\mu$ is reserved for the deterministic policy. $d^\mu$ is the **normalized** discounted state distribution, as in Chapter 11. A baseline is $b(s)$ (one argument, as in [Chapter 10](10-policy-gradients.md)), while $b(a\mid s)$ (two arguments) is the behaviour policy. $c$ is TD3's noise clip and $\kappa_r$ a reward scale.
 
-**Study time.** About 12–15 hours: 6–8 for the text and derivations, 3–4 for the code, 3 for the exercises.
+**Study time.** About 13–16 hours: 7–9 for the text and derivations, 3–4 for the code, 3 for the exercises.
 
 ---
 
@@ -509,9 +513,9 @@ For continuous actions $\mathcal H$ is the *differential* entropy, which can be 
 * **Exploration that follows the value landscape.** The optimal policy (§5.4) puts probability on actions in proportion to $\exp(q/\alpha)$. It keeps trying actions that look almost as good as the best, and quickly stops trying clearly bad ones. Unlike additive noise, this exploration is state-dependent and learned.
 * **Robustness and multimodality.** When several actions are nearly optimal, the max-ent policy keeps all of them, which helps under perturbations and model error. It also gives a good starting point for fine-tuning.
 * **Smooth, stable optimization.** The hard $\max$ in the Bellman equation becomes a smooth log-sum-exp, and policy improvement becomes a KL projection rather than an argmax that can jump.
-* **A probabilistic interpretation.** The soft Bellman equations are the message-passing equations of inference in a graphical model in which "optimality" is an observed variable (Levine, 2018). We will not need this view, but it explains where the equations come from.
+* **A probabilistic interpretation.** The soft Bellman equations are the message-passing equations of inference in a graphical model in which "optimality" is an observed variable (Levine, 2018). §5.7 derives this view. It also shows that (12.11) is the evidence lower bound of that model when the agent cannot choose how the dynamics turn out.
 
-The entropy bonus in (12.11) is different from the entropy *regularizer* in A2C/PPO ([Chapters 10](10-policy-gradients.md)–[11](11-trust-regions-and-ppo.md)). There, an entropy term is added to the loss at the current state only. Here, the entropy of *future* states is part of the return, so the agent also values *reaching* states where it can afford to be random.
+Compare the entropy *regularizer* of A2C/PPO ([Chapters 10](10-policy-gradients.md)–[11](11-trust-regions-and-ppo.md)), Eq. (10.26): $J+c_{\mathcal H}\,\mathbb E_{S\sim d^\pi}[\mathcal H(\pi(\cdot\mid S))]$. Expanding the expectation in (12.11) gives $J_\alpha(\pi)=J(\pi)+\alpha\sum_s\eta_\gamma(s)\,\mathcal H(\pi(\cdot\mid s))$, with $\eta_\gamma$ the discounted visit counts of Chapter 10. So, with $d^\pi$ the normalized discounted state distribution $\eta_\gamma/\sum_s\eta_\gamma(s)$, (10.26) is (12.11) up to the factor $\sum_s\eta_\gamma(s)$. In a continuing task that factor is the constant $1/(1-\gamma)$, and $c_{\mathcal H}=\alpha/(1-\gamma)$ gives the same objective. The difference is in how it is optimized. A2C/PPO differentiate only the entropy at the states in the current batch (sampled without the $\gamma^t$ weighting), holding the state distribution fixed, so they never value *reaching* states where the policy can afford to be random. Max-ent RL puts the entropy of future states into the return and the soft values (§5.2), so its policy gradient accounts for that effect.
 
 ### 5.2 Soft value functions and soft Bellman equations
 
@@ -657,6 +661,28 @@ $$
 ![Soft policy iteration](../code/ch12_continuous_control_actor_critic/figures/soft_policy_iteration.png)
 
 *Left:* the error $\lVert q_k-q^\ast\rVert_\infty$ of both methods. Soft policy iteration (solid) needs a handful of iterations, while soft value iteration (dashed) falls on a straight line in this log plot, contracting by a factor of at most $\gamma=0.9$ per sweep (Exercise 8). It is drawn down to $10^{-11}$, the accuracy of the reference $q^\ast$. *Middle:* as $\alpha\to0$, the soft optimum and the ordinary optimum coincide, faster than the linear bound. *Right:* the soft-optimal policy at one state. It is greedy below $\alpha\approx0.01$ and approaches uniform for large $\alpha$, but not monotonically for every action: action 2 gains probability and then loses it again, because the soft $Q$-values themselves change with $\alpha$.
+
+### 5.7 Max-ent RL as inference
+
+Where does (12.11) come from? Take a finite horizon $H$ and attach to every step a binary **optimality variable** $\mathcal O_t$ with $p(\mathcal O_t=1\mid s_t,a_t)\propto\exp\big(r(s_t,a_t)/\alpha\big)$. (Shift the rewards to be non-positive if you want an actual probability; the shift changes nothing below.) Give the actions a uniform prior. Up to a constant (the counting measure on actions), the trajectory $\tau=(s_0,a_0,\dots,s_H)$ then has prior weight $p(\tau)=d_0(s_0)\prod_tp(s_{t+1}\mid s_t,a_t)$, and conditioning on success at every step gives the posterior $p(\tau\mid\mathcal O_{0:H-1}=1)\propto p(\tau)\exp\big(\sum_tr(s_t,a_t)/\alpha\big)$. Control becomes the question "what did the agent do, given that it succeeded?" (Toussaint, 2009; Levine, 2018).
+
+**Backward messages are soft values.** Let $\beta_t(s,a)=p(\mathcal O_{t:H-1}=1\mid s_t=s,a_t=a)$ and $\beta_t(s)=\sum_a\beta_t(s,a)$. The sum-product recursion $\beta_t(s,a)=e^{r(s,a)/\alpha}\,\mathbb E_{S'\sim p(\cdot\mid s,a)}[\beta_{t+1}(S')]$, with $\beta_H\equiv1$, becomes, in the log units $Q_t=\alpha\log\beta_t(s,a)$ and $V_t=\alpha\log\beta_t(s)$,
+
+$$
+Q_t(s,a)=r(s,a)+\alpha\log\mathbb E_{S'\sim p(\cdot\mid s,a)}\Big[e^{V_{t+1}(S')/\alpha}\Big],\qquad V_t(s)=\alpha\log\sum_ae^{Q_t(s,a)/\alpha},
+\tag{12.21a}
+$$
+
+and the posterior policy is $p(a_t\mid s_t,\mathcal O_{t:H-1}=1)=\beta_t(s,a)/\beta_t(s)=\exp\big((Q_t(s,a)-V_t(s))/\alpha\big)$. The action backup and the policy are exactly those of (12.20). The *state* backup is not. By Jensen's inequality $\alpha\log\mathbb E[e^{V/\alpha}]\ge\mathbb E[V]$, with equality only when the next state is deterministic. The posterior conditions the *transitions* on success as well, $p(s'\mid s,a,\mathcal O)\propto p(s'\mid s,a)\,\beta_{t+1}(s')$, so it assumes the agent gets lucky. **Worked example.** With $\alpha=1$, a "safe" action leads for sure to a state worth $V=1$, and a "lottery" action leads with probability 0.1 to $V=10$ and otherwise to $V=-1$, an expected 0.10. Exact inference values the lottery at $\log(0.1e^{10}+0.9e^{-1})=7.70$ and prefers it, believing it wins with probability 0.99985. Max-ent RL compares $1$ with $0.10$ and plays safe.
+
+**The fix: inference that cannot choose its luck.** Restrict the approximate posterior to trajectories generated by the true dynamics and some policy, $q(\tau)=d_0(s_0)\prod_t\pi(a_t\mid s_t)\,p(s_{t+1}\mid s_t,a_t)$. Then $d_0$ and the dynamics cancel in the evidence lower bound (ELBO), and what remains is
+
+$$
+\log p(\mathcal O_{0:H-1}=1)\;\ge\;\mathbb E_q\Big[\log p(\mathcal O_{0:H-1}=1,\tau)-\log q(\tau)\Big]=\frac1\alpha\,\mathbb E_\pi\Big[\sum_{t=0}^{H-1}\Big(R_{t+1}+\alpha\,\mathcal H\big(\pi(\cdot\mid S_t)\big)\Big)\Big],
+\tag{12.21b}
+$$
+
+the finite-horizon, undiscounted version of (12.11) divided by $\alpha$ (Exercise 17). The gap in the bound is $D_{\mathrm{KL}}(q\Vert p(\tau\mid\mathcal O))$, so the max-ent policy is the best approximation to the posterior among those that leave the dynamics alone, and its backup is (12.20), with $\mathbb E[V]$ in place of $\alpha\log\mathbb E[e^{V/\alpha}]$. Discounting fits in as a probability $1-\gamma$ of moving to an absorbing state with zero reward at each step (Levine, 2018). [Chapter 16, §4.2–4.3](16-offline-rl-and-imitation.md) meets the same two objects in inverse RL. There the trajectory distribution $P(\zeta)\propto e^{\boldsymbol\omega^\top\boldsymbol\phi(\zeta)}$ (16.11) is the exact posterior, which is right only for deterministic dynamics. Maximum causal entropy (16.14)–(16.15) (Ziebart, 2010) is the fix that keeps the dynamics fixed. Replacing the uniform action prior by a reference policy $\pi_0$ turns the entropy in (12.21b) into $-D_{\mathrm{KL}}(\pi(\cdot\mid S_t)\Vert\pi_0(\cdot\mid S_t))$. That is the KL-regularized objective of RLHF ([Chapter 18](18-rl-for-language-models.md), (18.4) and the "Bayesian reading" in §3.3). The same duality between control and inference underlies Kappen's (2005) path-integral control and Todorov's (2007, 2009) linearly solvable MDPs. Its closed form, reference times exponentiated value, is the subject of §9.
 
 ---
 
@@ -908,6 +934,112 @@ Two lessons recur. First, **normalization layers** (layer norm, batch renorm) an
 
 ---
 
+## 9. KL-regularized policy search: REPS, RWR and MPO
+
+SAC's improvement step has the closed form $\pi\propto\exp(q/\alpha)$. The same form, a **reference distribution times an exponentiated value over a temperature**, keeps reappearing across this course: the natural-gradient update (11.22), advantage-weighted regression (16.35), MPPI ([Chapter 13, §4.3](13-model-based-rl.md)), the RLHF optimum (18.9), maximum-entropy IRL (16.11) and the posterior of §5.7. This section derives the template once. It then uses it to build the policy-search methods that came out of robot learning, episodic **REPS** and **RWR**, and their deep-RL successor **MPO**. Here $\eta$ without a subscript is the temperature of these methods, as in their papers; it is unrelated to the learning rates $\eta_Q,\eta_\pi,\eta_\alpha$.
+
+### 9.1 One template
+
+Let $p_0$ be any reference distribution (over actions, policy parameters, trajectories or responses), $f$ a score and $\eta>0$ a temperature. The argument of (12.17), with $p_0$ in place of the uniform distribution, gives
+
+$$
+\mathbb E_{x\sim q}\big[f(x)\big]-\eta\,D_{\mathrm{KL}}(q\Vert p_0)=\eta\log\mathbb E_{p_0}\big[e^{f/\eta}\big]-\eta\,D_{\mathrm{KL}}\Big(q\,\Big\Vert\,\frac{p_0\,e^{f/\eta}}{\mathbb E_{p_0}[e^{f/\eta}]}\Big),
+\tag{12.34}
+$$
+
+so the maximizer is $q^\ast\propto p_0\,e^{f/\eta}$ and the maximum is $\eta\log\mathbb E_{p_0}[e^{f/\eta}]$. (12.17) is the case of a uniform $p_0$, because $D_{\mathrm{KL}}(q\Vert\mathrm{uniform})=\log|\mathcal A|-\mathcal H(q)$. Theorem 18.1 is the case of a reference language model. The methods below differ in what $x$, $p_0$ and $f$ are, in how the temperature is chosen and in how $q^\ast$, which is usually known only on samples, becomes a parametric policy:
+
+| Method | $x$ | reference $p_0$ | score $f$ | temperature | temperature set by | $q^\ast$ becomes a policy by |
+|---|---|---|---|---|---|---|
+| SAC improvement (12.19) | $a$ at a state | uniform | $q^{\mathrm{soft}}(s,\cdot)$ | $\alpha$ | dual descent to a target entropy (12.33) | reverse-KL projection, reparameterized (12.30) |
+| NPG / mirror descent (11.22) | $a$ at a state | $\pi_k(\cdot\mid s)$ | $A_{\pi_k}(s,\cdot)$ | $(1-\gamma)/\eta$ | the step size | exact (tabular softmax) |
+| Episodic REPS (§9.2) | $\boldsymbol\theta$ | $p_{\text{old}}(\boldsymbol\theta)$ | return $R(\boldsymbol\theta)$ | $\eta$ | a KL bound, via the dual (12.36) | weighted maximum likelihood |
+| RWR (§9.3) | $\boldsymbol\theta$ (or $a$) | $p_{\text{old}}$ | return | $\eta$ | hand-set | weighted maximum likelihood |
+| MPO (§9.4) | $a$ at a state | $\pi_{\text{old}}(\cdot\mid s)$ | critic $Q(s,\cdot)$ | $\eta$ | a KL bound, via its dual | weighted ML under a second KL bound |
+| AWR / AWAC / IQL (16.35) | $a$ at a state | behaviour $\hat b(\cdot\mid s)$ | advantage $A(s,\cdot)$ | $1/\beta$ | hand-set | weighted ML on logged actions (16.36) |
+| MPPI ([Ch. 13, §4.3](13-model-based-rl.md)) | action sequence | Gaussian around the last plan | predicted return $J$ | $\lambda_{\text{MPPI}}$ | hand-set | weighted mean of the samples |
+| RLHF optimum (18.9), DPO | response $y$ | $\pi_{\mathrm{ref}}(\cdot\mid x)$ | reward $r(x,y)$ | $\beta$ | hand-set | PPO on the KL-shaped reward; DPO solves for $r$ instead |
+| Max-ent IRL (16.11) | trajectory $\zeta$ | uniform (deterministic dynamics) | $\boldsymbol\omega^\top\boldsymbol\phi(\zeta)$ | 1 (absorbed in $\boldsymbol\omega$) | – | none: the template is the demonstrator model, and $\boldsymbol\omega$ is fitted |
+| Exact posterior (§5.7) | trajectory $\tau$ | prior $p(\tau)$ | $\sum_tr$ | $\alpha$ | – | none (optimistic about dynamics; the ELBO (12.21b) fixes it) |
+
+The cross-entropy method ([Chapter 10, §15.3](10-policy-gradients.md)) is the hard-threshold relative: it replaces $e^{f/\eta}$ by equal weights on the best $K$ samples.
+
+### 9.2 Episodic REPS
+
+**Setting.** In episodic robot learning a low-dimensional parameter vector $\boldsymbol\theta$ (for example the weights of dynamic movement primitives, DMPs; Ijspeert et al., 2013) defines a whole movement, and each rollout returns one number $R(\boldsymbol\theta)$. The policy to improve is an *upper-level* search distribution $p(\boldsymbol\theta)$, as in the black-box methods of [Chapter 10, §15](10-policy-gradients.md). Relative entropy policy search (REPS; Peters, Mülling & Altün, 2010) asks for the best new distribution that stays within a KL ball around the one that generated the data:
+
+$$
+\max_q\ \mathbb E_{\boldsymbol\theta\sim q}\big[R(\boldsymbol\theta)\big]\quad\text{s.t.}\quad D_{\mathrm{KL}}(q\Vert p_{\text{old}})\le\epsilon,\qquad\textstyle\int q=1.
+\tag{12.35}
+$$
+
+With a multiplier $\eta$ for the KL constraint, the Lagrangian is (12.34) plus the constant $\eta\epsilon$, so $q^\ast\propto p_{\text{old}}\,e^{R/\eta}$. Substituting back gives the **dual**
+
+$$
+g(\eta)=\eta\,\epsilon+\eta\log\mathbb E_{\boldsymbol\theta\sim p_{\text{old}}}\big[e^{R(\boldsymbol\theta)/\eta}\big],\qquad\eta^\ast=\arg\min_{\eta>0}g(\eta),
+\tag{12.36}
+$$
+
+a convex function of the single variable $\eta$, with $g'(\eta)=\epsilon-D_{\mathrm{KL}}(q_\eta\Vert p_{\text{old}})$ (Exercise 16). At $\eta^\ast$ the constraint therefore holds with equality, and strong duality gives $g(\eta^\ast)=\mathbb E_{q^\ast}[R]$. The temperature is no longer a hyperparameter: it is solved for, in reward units, from the data. With $N$ samples $\boldsymbol\theta_i\sim p_{\text{old}}$ the expectation becomes an average, $q^\ast$ becomes weights on the samples, and the **M-step** fits a parametric distribution to those weights by **weighted maximum likelihood**, the M-projection $\arg\min_{\boldsymbol\phi}D_{\mathrm{KL}}(q^\ast\Vert p_{\boldsymbol\phi})$ restricted to the samples. For a Gaussian:
+
+$$
+w_i=\frac{e^{R_i/\eta^\ast}}{\sum_je^{R_j/\eta^\ast}},\qquad\mathbf m_{\text{new}}=\sum_iw_i\boldsymbol\theta_i,\qquad\boldsymbol\Sigma_{\text{new}}=\sum_iw_i(\boldsymbol\theta_i-\mathbf m_{\text{new}})(\boldsymbol\theta_i-\mathbf m_{\text{new}})^\top .
+\tag{12.37}
+$$
+
+The sample KL is $\sum_iw_i\log(Nw_i)\le\log N$, so $\epsilon$ must be below $\log N$. Why bound the KL at all? As $\eta\to0$ all weight goes to the best sample and the distribution collapses onto it. As $\eta\to\infty$ nothing changes. The bound sets how far the new distribution may move from the data that support it, in units (nats) that do not depend on the scale of the reward. The AAAI paper states REPS for the step-based, average-reward setting. There a second set of constraints on the state distribution produces a value function as a Lagrange multiplier, and the weights become $\exp(\delta/\eta)$ with a Bellman-error-like $\delta$. The episodic form above is the one used most in robot learning (Deisenroth, Neumann & Peters, 2013).
+
+```
+Algorithm 12.5  Episodic REPS with a Gaussian search distribution
+Input: initial mean m and covariance Sigma; KL bound eps < log N; N rollouts per iteration
+repeat
+    Sample theta_1..theta_N ~ N(m, Sigma); run one rollout each, giving returns R_1..R_N
+    E-step:  eta* <- argmin_{eta>0}  eta*eps + eta*log( (1/N) sum_i exp(R_i/eta) )      (12.36)
+             (convex in eta; minimize over log eta with standardized returns, gradient eta*(eps - KL))
+             w_i <- exp(R_i/eta*) / sum_j exp(R_j/eta*)        # check: sum_i w_i log(N w_i) = eps
+    M-step:  m <- sum_i w_i theta_i;   Sigma <- sum_i w_i (theta_i - m)(theta_i - m)^T    (12.37)
+             (diagonal Sigma, or full Sigma with regularization when N >> dim theta)
+until the return stops improving
+```
+
+### 9.3 Reward-weighted regression: the same step with a fixed temperature
+
+Dayan & Hinton (1997) noticed that, for a positive "utility" $u(R)$, maximizing $\log\mathbb E_{p_{\boldsymbol\phi}}[u(R)]$ has the structure of maximum likelihood with a latent variable, so it can be done by **expectation-maximization**. The E-step sets $q\propto p_{\text{old}}\,u(R)$, the M-step is weighted maximum likelihood, and each iteration cannot decrease $\mathbb E_p[u(R)]$, even when it moves the parameters a long way. **Reward-weighted regression** (RWR; Peters & Schaal, 2007) uses $u(R)=e^{R/\eta}$, which is exactly (12.37) with a temperature chosen by hand (or by a heuristic) instead of by the dual. PoWER and PI² ([Chapter 10, §15.3](10-policy-gradients.md)) belong to the same reward-weighted family. The difficulty with a fixed $\eta$ is that the useful temperature is set by the spread of the returns, which shrinks by orders of magnitude as learning proceeds. Many implementations therefore rescale the returns of each batch, a heuristic version of what REPS does exactly.
+
+### 9.4 MPO and V-MPO: the template with a critic
+
+**Maximum a posteriori policy optimisation** (MPO; Abdolmaleki, Springenberg, Tassa, Munos, Heess & Riedmiller, 2018) is REPS made step-based and off-policy, with a learned critic in place of rollout returns. Its **E-step** is the template at every state, $q(a\mid s)\propto\pi_{\text{old}}(a\mid s)\exp(Q(s,a)/\eta)$, evaluated on a few actions sampled from $\pi_{\text{old}}$ at each replayed state. Here $\eta$ comes from the dual of the bound $\mathbb E_s[D_{\mathrm{KL}}(q(\cdot\mid s)\Vert\pi_{\text{old}}(\cdot\mid s))]\le\epsilon$, and $Q$ is trained off-policy from replay (with Retrace). Its **M-step** fits the network by weighted maximum likelihood, $\max_{\boldsymbol\theta}\mathbb E_s\mathbb E_{a\sim q}[\log\pi_{\boldsymbol\theta}(a\mid s)]$, subject to a *second* trust region $\mathbb E_s[D_{\mathrm{KL}}(\pi_{\text{old}}\Vert\pi_{\boldsymbol\theta})]\le\epsilon_M$. For Gaussian policies it uses separate bounds for the mean and the covariance, which limits how fast the covariance can shrink. The second bound is needed because the fitted policy can move much further than $q$, as the experiment below measures. Compared with SAC, MPO uses the previous policy rather than the uniform distribution as the reference, and it fixes the KL per step instead of the entropy. Compared with TRPO/PPO ([Chapter 11](11-trust-regions-and-ppo.md)), its trust-region problem over the non-parametric $q$ is solved in closed form, and the critic lets it reuse data. [Chapter 11](11-trust-regions-and-ppo.md) lists it among PPO's relatives for this reason. **V-MPO** (Song et al., 2020) is the on-policy version. It learns a state value $V$, uses $n$-step advantages in place of $Q$, applies the exponential weights only to the top half of the advantages in each batch, and keeps both KL bounds. Without importance weighting, entropy bonuses or population-based tuning, it set new multi-task scores on Atari-57 and DMLab-30 and also learned humanoid control.
+
+### 9.5 Experiment: REPS on a reaching task
+
+[`episodic_reps.py`](../code/ch12_continuous_control_actor_critic/episodic_reps.py) tests the episodic methods on a planar two-link arm (links of length 1). Each joint follows a DMP with 5 basis weights, and the joint-space goal is learnable too, so $\boldsymbol\theta\in\mathbb R^{12}$, all in radians. A rollout is 100 Euler steps of 0.01 s. The return is $-1000\lVert e(1\,\mathrm s)-\text{target}\rVert^2-1000\lVert e(0.5\,\mathrm s)-\text{via}\rVert^2-10^{-3}\int\lVert\ddot q\rVert^2dt-\lVert\dot q(1\,\mathrm s)\rVert^2$, where $e(t)$ is the end-effector position. It is deterministic, so all the randomness is in the search. The cost $-R$ is 5,500 for the initial "do not move" parameters. The best value found was 0.114 (L-BFGS-B with finite-difference gradients, polished from the best final point of any run), with the target and via-point hit to within 0.14 mm and 0.41 mm. Every method starts from $\mathcal N(\boldsymbol\theta_0,\mathbf I)$ and spends $N=50$ rollouts per iteration: REPS with $\epsilon\in\{0.5,1,2\}$ (diagonal Gaussian, $\eta^\ast$ by `scipy.optimize`), RWR with fixed $\eta\in\{1,10,100,1000\}$, CEM on the best $K=25$, and antithetic ES with centred ranks and Adam ($\sigma=0.03$, step 0.1; Algorithm 10.9, with the Adam and rank-shaping code imported from Chapter 10's `black_box_search.py`). ES's $\sigma$ and step size and CEM's $K$ were the best of small grids on separate pilot seeds. The table gives the cost of the search mean (median and interquartile range over 20 seeds):
+
+| method | 500 rollouts | 1,000 | 2,000 | 4,000 | final search s.d. |
+|---|---|---|---|---|---|
+| REPS, $\epsilon=0.5$ | 28.8 [22.4, 60] | 1.78 [1.32, 4.59] | 0.91 [0.63, 1.19] | 0.72 [0.50, 0.97] | $1.1\times10^{-3}$ |
+| REPS, $\epsilon=1$ | 4.78 [2.91, 6.94] | 1.20 [0.92, 1.43] | 0.83 [0.47, 1.01] | 0.82 [0.45, 0.99] | $4.5\times10^{-5}$ |
+| REPS, $\epsilon=2$ | 3.20 [1.99, 6.80] | 2.20 [1.08, 4.47] | 2.15 [1.05, 4.37] | 2.15 [1.05, 4.37] | $3.7\times10^{-10}$ |
+| RWR, $\eta=1$ | 621 [496, 773] | 621 | 621 | 621 | $9\times10^{-16}$ |
+| RWR, $\eta=10$ | 590 [491, 749] | 587 | 583 | 580 [490, 736] | $3.2\times10^{-7}$ |
+| RWR, $\eta=100$ | 183 [75, 289] | 125 [60, 220] | 106 [54, 160] | 95 [52, 136] | 0.034 |
+| RWR, $\eta=1000$ | 229 [182, 339] | 127 [95, 193] | 99 [64, 132] | 77 [52, 124] | 0.16 |
+| CEM, $K=25$ | 146 [100, 186] | 19.1 [12.7, 38.2] | 4.84 [2.44, 11.5] | 3.62 [1.24, 9.63] | $1.4\times10^{-3}$ |
+| ES, $\sigma=0.03$ | 1,060 [960, 1,100] | 469 [382, 528] | 11.5 [7.2, 17.3] | 2.07 [1.77, 2.94] | 0.03 (fixed) |
+
+![Episodic REPS on a two-link reaching task](../code/ch12_continuous_control_actor_critic/figures/episodic_reps.png)
+
+*Left:* cost of the search mean against rollouts (median and interquartile band over 20 seeds; dotted line: best value found). *Middle:* REPS's temperature $\eta^\ast$ and the standard deviation of each batch's returns ($\epsilon=1$, median over seeds), both in reward units. *Right:* end-effector paths of 12 samples from the initial distribution (grey) and of the REPS mean after 4,000 rollouts on the best seed, with the arm drawn at 0, 0.5 and 1 s.
+
+What the run shows:
+
+1. **The dual does what (12.36) says.** Over all 80 iterations of all 20 seeds, the sample KL at $\eta^\ast$ equalled $\epsilon$ to within $3\times10^{-8}$, and $g(\eta^\ast)$ equalled $\mathbb E_q[R]$ (strong duality) to within $5\times10^{-5}$ reward units. On the first batch (returns with mean $-9{,}466$ and s.d. 6,874), $\epsilon=1$ gave $\eta^\ast=1{,}907$ and an effective sample size $1/\sum_iw_i^2$ of 14.8 out of 50.
+2. **A fixed temperature cannot serve the whole run.** With $\epsilon=1$, $\eta^\ast$ fell from a median of 1,330 in the first iteration to $1.3\times10^{-5}$ in the last, eight orders of magnitude, tracking the spread of the returns (middle panel; $\eta^\ast$ was a median 0.50 times the return s.d.). RWR with $\eta=1$ put all the weight on one sample and collapsed in the first iteration on all 20 seeds. With $\eta=10$ it collapsed within 9 iterations on 17 seeds. With $\eta=100$ or $1000$ it did not collapse (final search s.d. 0.034 and 0.16) but crawled: the cost was still 95 and 77 after 4,000 rollouts.
+3. **REPS was the fastest early.** After 1,000 rollouts it reached a cost of 1.2 ($\epsilon=1$), against 19 for CEM and 469 for ES. Larger $\epsilon$ moves faster at first and collapses sooner. $\epsilon=0.5$ was slower at 500 rollouts and had a slightly lower median at 4,000 (0.72, with overlapping interquartile ranges).
+4. **The bound holds on the samples, not on the fitted Gaussian.** The KL between successive *fitted* Gaussians had a median of 1.65 for $\epsilon=1$ (90th percentile 2.34), 0.76 for $\epsilon=0.5$ and 4.42 for $\epsilon=2$. The weighted mean and variance of about 12 effective samples in 12 dimensions are noisy, and the noise moves the fit beyond $q$. This is the reason for MPO's second KL bound.
+5. **Every weighted-ML method converged prematurely.** The weighted sample variance in (12.37) is biased low, by roughly the factor $1-\sum_iw_i^2$ (about 0.91 for 12 effective samples), so the search distribution shrinks a little faster than the problem warrants at every step. By 4,000 rollouts REPS ($\epsilon=1$) had a search s.d. of $4.5\times10^{-5}$ and stopped at a cost of 0.82, seven times the best known 0.114. CEM stopped at 3.6. ES, whose $\sigma$ is fixed, was slow but still improving (2.07). The elite variance of CEM is known to behave this way ([Chapter 10, §15.3](10-policy-gradients.md)), and the remedies are the same: a floor or added noise on the variance, bounds on how fast the covariance may shrink, or more samples per iteration.
+
+---
+
 ## In code
 
 The results are interleaved with the text above, and the script table under "At a glance" lists runtimes; [the folder's README](../code/ch12_continuous_control_actor_critic/README.md) has the commands and headline numbers. All scripts run from the repository root, use one CPU thread, print their seed and settings, and accept `--quick` (a smoke test that writes no figures). Shared pieces live in [`common.py`](../code/ch12_continuous_control_actor_critic/common.py): the environment with actions rescaled to $[-1,1]$, the replay buffer (which stores `terminated`, never `truncated`), MLPs, Polyak averaging, evaluation, and the batched exact-value rollout for Pendulum with its check against Gymnasium.
@@ -920,6 +1052,7 @@ The results are interleaved with the text above, and the script table under "At 
 * [`soft_policy_iteration.py`](../code/ch12_continuous_control_actor_critic/soft_policy_iteration.py): §5.6.
 * [`tanh_squash_check.py`](../code/ch12_continuous_control_actor_critic/tanh_squash_check.py): §6.3.
 * [`sac.py`](../code/ch12_continuous_control_actor_critic/sac.py) and [`sac_temperature.py`](../code/ch12_continuous_control_actor_critic/sac_temperature.py): §6.7.
+* [`episodic_reps.py`](../code/ch12_continuous_control_actor_critic/episodic_reps.py): §9.5 and Exercise 16. NumPy and SciPy only; it imports the Adam optimizer and the centred-rank fitness shaping of [Chapter 10](10-policy-gradients.md)'s `black_box_search.py`.
 
 ---
 

@@ -62,7 +62,7 @@ def eps_greedy_expectation(X: np.ndarray, eps: float) -> np.ndarray:
     return (probs * X).sum(axis=1)
 
 
-# Behaviour policies for the diagnostic runs of Section 11.4: the exploration rate used to
+# Behaviour policies for the long diagnostic runs of Section 11.5: the exploration rate used to
 # *choose* actions in A and in B (1.0 = uniformly random).  The learning targets do not change.
 BEHAVIOURS = {
     "eps-greedy": lambda eps: (eps, eps),          # the standard setting (S&B Example 6.7)

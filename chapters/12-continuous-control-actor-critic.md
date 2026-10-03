@@ -208,7 +208,7 @@ At a positive state the critic says "a smaller action would be better". The poli
 
 *Gradient.* $\partial_\theta J=-0.4516\times1.2903=-0.5827$.
 
-*Check.* Here $J(\theta)=-P(\theta)\,\mathbb E[S_0^2]=-(1+\theta^2)/\big(1-0.9(1+\theta)^2\big)$. With $N=1+\theta^2$ and $D=1-0.9(1+\theta)^2$ we get $N'=2\theta=-1$, $D'=-1.8(1+\theta)=-0.9$, $N=1.25$, $D=0.775$, and $J'=-(N'D-ND')/D^2=-(-0.775+1.125)/0.6006=-0.5827$. The two agree. The gradient is negative, so ascent makes $\theta$ more negative (stronger feedback), towards the optimum $\theta^\ast\approx-0.588$.
+*Check.* Here $J(\theta)=-P(\theta)\,\mathbb E[S_0^2]=-(1+\theta^2)/\big(1-0.9(1+\theta)^2\big)$. With $N=1+\theta^2$ and $D=1-0.9(1+\theta)^2$ we get $N'=2\theta=-1$, $D'=-1.8(1+\theta)=-0.9$, $N=1.25$, $D=0.775$, and $J'=-(N'D-ND')/D^2=-(-0.775+1.125)/0.6006=-0.5827$. The two agree. The gradient is negative, so ascent makes $\theta$ more negative (stronger feedback), towards the optimum $\theta^\ast\approx-0.588$, which [Chapter 03, §11.4](03-dynamic-programming.md) obtains in closed form from the Riccati equation of the linear-quadratic regulator.
 
 [`dpg_lqr_check.py`](../code/ch12_continuous_control_actor_critic/dpg_lqr_check.py) automates this. It also handles process noise $W_t\sim\mathcal N(0,\sigma_w^2)$ with $\sigma_w=0.3$, for which $J=-P\,\mathbb E[S_0^2]-\gamma P\sigma_w^2/(1-\gamma)$ with $\mathbb E[S_0^2]=1$ (Exercise 3). Its output:
 
@@ -511,7 +511,7 @@ $$
 For continuous actions $\mathcal H$ is the *differential* entropy, which can be negative: a policy concentrated on a small interval has very negative entropy. The temperature sets the exchange rate between reward and randomness. As $\alpha\to0$ we recover the ordinary objective. Why would we want this?
 
 * **Exploration that follows the value landscape.** The optimal policy (§5.4) puts probability on actions in proportion to $\exp(q/\alpha)$. It keeps trying actions that look almost as good as the best, and quickly stops trying clearly bad ones. Unlike additive noise, this exploration is state-dependent and learned.
-* **Robustness and multimodality.** When several actions are nearly optimal, the max-ent policy keeps all of them, which helps under perturbations and model error. It also gives a good starting point for fine-tuning.
+* **Robustness and multimodality.** When several actions are nearly optimal, the max-ent policy keeps all of them, which helps under perturbations and model error. (Eysenbach & Levine, 2022, made one version of this precise: max-ent RL maximizes a lower bound on a robust objective for certain sets of rewards and dynamics; see [Chapter 20, §11.6](20-deep-rl-in-practice.md).) It also gives a good starting point for fine-tuning.
 * **Smooth, stable optimization.** The hard $\max$ in the Bellman equation becomes a smooth log-sum-exp, and policy improvement becomes a KL projection rather than an argmax that can jump.
 * **A probabilistic interpretation.** The soft Bellman equations are the message-passing equations of inference in a graphical model in which "optimality" is an observed variable (Levine, 2018). §5.7 derives this view. It also shows that (12.11) is the evidence lower bound of that model when the agent cannot choose how the dynamics turn out.
 

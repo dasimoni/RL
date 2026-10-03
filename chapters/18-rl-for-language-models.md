@@ -700,7 +700,7 @@ Input: prompt x; policy pi_ref; reward model r_phi; number of samples n >= 1
     return y_j with j = argmax_i r_phi(x, y_i)              (ties broken at random)
 ```
 
-Best-of-$n$ costs $n$ times more inference and no training. It is used for evaluation, as a baseline, and to produce data for further fine-tuning: training on the selected samples ("rejection-sampling fine-tuning") was part of Llama 2's post-training, for example (Touvron et al., 2023).
+Best-of-$n$ costs $n$ times more inference and no training. It is used for evaluation, as a baseline, and to produce data for further fine-tuning: training on the selected samples ("rejection-sampling fine-tuning") was part of Llama 2's post-training, for example (Touvron et al., 2023). Repeated over several rounds, this is *expert iteration*, which Section 9.5 analyses.
 
 **Its distribution.** Suppose first that rewards have no ties and order the responses by reward. Let $F(y)=\Pr_{y'\sim\pi_{\mathrm{ref}}}\{r(y')\le r(y)\}$ and let $F(y^-)$ be the same probability with a strict inequality. The best of $n$ is $y$ exactly when all $n$ samples score at most $r(y)$, minus the event that they all score strictly less:
 

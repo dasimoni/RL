@@ -18,7 +18,7 @@ makes it the right place to check the chapter's central formulas numerically:
      reward-KL trade-off versus the optimal frontier traced by pi*_beta.
 
 Run from the repository root:
-    python code/ch18_rl_for_language_models/kl_bandit.py           # full (figures), ~1 min
+    python code/ch18_rl_for_language_models/kl_bandit.py           # full (figures), ~15 s
     python code/ch18_rl_for_language_models/kl_bandit.py --quick   # smoke test, no figures
 """
 from __future__ import annotations
@@ -257,6 +257,15 @@ def main():
               f"  |SLSQP|={np.abs(p_slsqp - pi_star).max():.1e}  |exact-grad|={np.abs(p_grad - pi_star).max():.1e}"
               f"  |REINFORCE|={np.abs(p_rf - pi_star).max():.1e}  KL(pi*||ref)={kl(pi_star, pi_ref):.3f}"
               f"  E[r]={pi_star @ r:.3f}")
+    if not quick:
+        # Why is exact gradient ascent least accurate at beta = 0.1?  In logit coordinates the
+        # curvature of J along arm a is roughly beta * pi_a, and pi*_0.1 gives some arms
+        # probabilities as small as 1e-11, so the problem is badly conditioned and plain gradient
+        # ascent converges slowly.  Five times more steps shrink the error, but not to zero.
+        pi_star, _ = closed_form(pi_ref, r, 0.1)
+        p_long = solve_exact_gradient(pi_ref, r, 0.1, steps=100000, lr=2.0)
+        print(f"  beta=0.1, exact gradient with 100000 steps instead of 20000: "
+              f"|exact-grad|={np.abs(p_long - pi_star).max():.1e}  (smallest pi*_0.1(y) = {pi_star.min():.1e})")
     # any other policy does worse: random perturbations of pi*
     beta = 0.5
     pi_star, J_star = closed_form(pi_ref, r, beta)
@@ -309,7 +318,10 @@ def main():
 
     # ---- 3. Best-of-n ------------------------------------------------------------------
     print("\n[3] Best-of-n: exact KL vs log n - (n-1)/n, and the reward-KL frontier")
-    ns = np.unique(np.round(np.logspace(0, 3, 25)).astype(int))
+    # a log-spaced grid plus the values of n quoted in the text and on the figure, so that every
+    # printed or annotated n is a value that was actually computed
+    ns = np.unique(np.concatenate([np.round(np.logspace(0, 3, 25)),
+                                   [2, 4, 8, 16, 64, 256, 512]]).astype(int))
     big_K = 10000
     pi_u = np.ones(big_K) / big_K
     r_u = np.random.default_rng(SEED + 2).normal(size=big_K)
@@ -320,7 +332,7 @@ def main():
         rows.append((n, kl(p8, pi_ref), kl(pu, pi_u), bon_kl_bound(n), p8 @ r, pu @ r_u))
     rows = np.array(rows)
     for n in [1, 2, 4, 16, 64, 256, 1000]:
-        i = int(np.argmin(np.abs(rows[:, 0] - n)))
+        i = int(np.flatnonzero(rows[:, 0] == n)[0])  # exact match: n is on the grid
         print(f"  n={int(rows[i, 0]):<5} bound={rows[i, 3]:.3f}  exact KL (K=8)={rows[i, 1]:.3f}  "
               f"exact KL (K=10^4 uniform)={rows[i, 2]:.3f}  E[r] BoN (K=8)={rows[i, 4]:.3f}")
     # optimal frontier on the K=10^4 problem vs best-of-n at equal KL
@@ -329,12 +341,12 @@ def main():
                       for b in beta_grid])
     gap_rows = []
     for n in [4, 16, 64, 256]:
-        i = int(np.argmin(np.abs(rows[:, 0] - n)))
+        i = int(np.flatnonzero(rows[:, 0] == n)[0])
         kl_n, r_n = rows[i, 2], rows[i, 5]
         r_opt = np.interp(kl_n, front[::-1, 0], front[::-1, 1])
         gap_rows.append((n, kl_n, r_n, r_opt))
-        print(f"  K=10^4: n={n:<4} KL={kl_n:.3f}  E[r] best-of-n={r_n:.3f}  "
-              f"E[r] of pi*_beta at the same KL={r_opt:.3f}")
+        print(f"  K=10^4: n={int(rows[i, 0]):<4} KL={kl_n:.3f}  E[r] best-of-n={r_n:.3f}  "
+              f"E[r] of pi*_beta at the same KL={r_opt:.3f}  (ratio {r_n / r_opt:.3f})")
 
     print(f"\nTotal time {time.time() - t0:.1f}s")
     if quick:
@@ -359,7 +371,8 @@ def main():
     ax.set_xlabel("response y and its true reward r(y)")
     ax.set_ylabel("probability")
     ax.set_title("Closed form vs solvers (K=8)")
-    ax.legend(fontsize=7, loc="upper left")
+    ax.set_ylim(0, 1.25)  # head-room so the legend does not cover the bars
+    ax.legend(fontsize=7, loc="upper left", ncol=2)
 
     ax = axes[1]
     for beta in det_betas:
@@ -378,8 +391,8 @@ def main():
     ax.plot(front[:, 0], front[:, 1], "k-", label=r"optimal frontier $\pi^\ast_\beta$")
     ax.plot(rows[:, 2], rows[:, 5], "o", color="tab:purple", ms=4, label="best-of-n (exact KL)")
     for n in [2, 8, 64, 512]:
-        i = int(np.argmin(np.abs(rows[:, 0] - n)))
-        ax.annotate(f"n={n}", (rows[i, 2], rows[i, 5]), fontsize=7, xytext=(4, -10),
+        i = int(np.flatnonzero(rows[:, 0] == n)[0])
+        ax.annotate(f"n={int(rows[i, 0])}", (rows[i, 2], rows[i, 5]), fontsize=7, xytext=(4, -10),
                     textcoords="offset points")
     ax.set_xlim(0, 7.5)
     ax.set_xlabel(r"KL$(\pi\,\Vert\,\pi_{\mathrm{ref}})$ (nats)")

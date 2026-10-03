@@ -131,8 +131,11 @@ def token_logprobs(model: PolicyLM, cond, tokens, mask):
 def token_kl_exact(model: PolicyLM, ref: PolicyLM, cond, tokens, mask):
     """Per-position exact KL( pi(.|s_t) || pi_ref(.|s_t) ), summed over the vocabulary.
 
-    Summed over t along responses sampled from pi, this is an unbiased, low-variance estimate
-    of the sequence-level KL(pi(.|x) || pi_ref(.|x)) (Section 1.3, eq. 18.5).
+    Summed over t along responses sampled from pi, this is an unbiased estimate of the
+    sequence-level KL(pi(.|x) || pi_ref(.|x)) (Section 1.3, eq. 18.5).  Each term is the
+    conditional expectation of the sampled log-ratio given the prefix, so the per-step sampling
+    noise is removed and the estimate is never negative.  It is usually, but not always, less
+    noisy than the sum of sampled log-ratios (Exercise 1 has a counterexample).
     """
     lp = F.log_softmax(model.logits(cond, tokens), dim=-1)
     with torch.no_grad():

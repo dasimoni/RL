@@ -25,11 +25,11 @@ This chapter builds that machinery from first principles and runs every piece of
 
 | Script | What it shows | Sections | Full run |
 |---|---|---|---|
-| [`kl_bandit.py`](../code/ch18_rl_for_language_models/kl_bandit.py) | The closed form $\pi^\ast_\beta$ checked against three independent solvers; population DPO recovers $\pi^\ast_\beta$; with deterministic preferences DPO collapses whatever $\beta$ is, IPO does not; exact best-of-$n$ KL vs the $\log n-(n-1)/n$ formula; best-of-$n$ vs the optimal reward–KL frontier | 3, 5, 6, 8 | 12 s |
+| [`kl_bandit.py`](../code/ch18_rl_for_language_models/kl_bandit.py) | The closed form $\pi^\ast_\beta$ checked against three independent solvers; population DPO recovers $\pi^\ast_\beta$; with deterministic preferences DPO collapses whatever $\beta$ is, IPO does not; exact best-of-$n$ KL vs the $\log n-(n-1)/n$ formula; best-of-$n$ vs the optimal reward–KL frontier | 3, 5, 6, 8 | 15 s |
 | [`toy_lm.py`](../code/ch18_rl_for_language_models/toy_lm.py) | Library: a conditional GRU language model, sampling with masks, per-token log-probabilities and exact KLs, a scalar-head GRU for reward and value models | 1 | — |
-| [`rlhf_toy.py`](../code/ch18_rl_for_language_models/rlhf_toy.py) | The whole pipeline: SFT → preferences from a hidden true reward → Bradley–Terry reward model → PPO with a per-token KL (value model, GAE), RLOO, DPO, IPO and best-of-$n$; a $\beta$ sweep showing over-optimization | 2–8 | 5.1 min |
-| [`grpo_rlvr.py`](../code/ch18_rl_for_language_models/grpo_rlvr.py) | RL with a verifier on a "chain-of-thought arithmetic" task: REINFORCE, RLOO, GRPO, Dr. GRPO, DAPO-style and process-reward GRPO; pass@$k$ and majority voting for the base and RL models | 9–12 | 5.1 min |
-| [`exercise_solutions.py`](../code/ch18_rl_for_language_models/exercise_solutions.py) | Numerical checks for the exercises; adaptive KL control, SimPO and iterated RLHF on the toy | Exercises | 2.2 min |
+| [`rlhf_toy.py`](../code/ch18_rl_for_language_models/rlhf_toy.py) | The whole pipeline: SFT → preferences from a hidden true reward → Bradley–Terry reward model → PPO with a per-token KL (value model, GAE), RLOO, DPO, IPO and best-of-$n$; a $\beta$ sweep showing over-optimization; replications with `--seed` | 2–8 | 5.2 min |
+| [`grpo_rlvr.py`](../code/ch18_rl_for_language_models/grpo_rlvr.py) | RL with a verifier on a "chain-of-thought arithmetic" task: REINFORCE, RLOO, GRPO, Dr. GRPO, DAPO-style and process-reward GRPO, plus two ablations of the KL term; pass@$k$ and majority voting for the base and RL models | 9–12 | 6.5 min |
+| [`exercise_solutions.py`](../code/ch18_rl_for_language_models/exercise_solutions.py) | Numerical checks for the exercises; adaptive KL control, SimPO and iterated RLHF on the toy | Exercises | 2.6 min |
 
 **Study time.** About 12–15 hours: 7–8 for the text and derivations, 2 to run and modify the code, 3–5 for the exercises.
 
@@ -40,8 +40,10 @@ This chapter builds that machinery from first principles and runs every piece of
 * $r(x,y)$ is a generic reward on whole responses. $r_{\mathrm{true}}$ is the reward we actually care about (human judgement, or the hidden reward of our toys), called the *gold* reward in the over-optimization literature; $r_\phi$ is a learned proxy for it.
 * $\sigma(z)=1/(1+e^{-z})$ is the logistic function. $(x,y_w,y_l)$ is a preference triple: $y_w$ was preferred ("won") over $y_l$.
 * $h_{\boldsymbol\theta}(x,y)\doteq\log\frac{\pi_{\boldsymbol\theta}(y\mid x)}{\pi_{\mathrm{ref}}(y\mid x)}$ is the log-ratio to the reference. $Z_\beta(x)$ is a partition function.
-* $G$ is the number of responses sampled per prompt (the *group*); $k$ plays the same role for RLOO in Section 4.3 and is also the $k$ of pass@$k$; $n$ is the number of samples in best-of-$n$. In this chapter $n$ is not the $n$ of $n$-step returns.
-* $\epsilon$ is PPO's clipping range, as in [Chapter 11](11-trust-regions-and-ppo.md). The token-level MDP uses the course's indexing $S_t, A_t, R_{t+1}$ (Section 1.2).
+* $G$ is the number of responses sampled per prompt (the *group*); only in (18.3) does $G_1$ denote a return, as in NOTATION.md. $k$ plays the same role as $G$ for RLOO in Section 4.3 and is also the $k$ of pass@$k$; $n$ is the number of samples in best-of-$n$, and in the toy of Section 9.4 also the number of digits in a problem (the two are unrelated). In this chapter $n$ is not the $n$ of $n$-step returns.
+* $\epsilon$ is PPO's clipping range, as in [Chapter 11](11-trust-regions-and-ppo.md). The token-level MDP uses the course's indexing $S_t, A_t, R_{t+1}$ (Section 1.2): $A_t$ is the token chosen at step $t$, and $\hat A_t$ (with a hat) an advantage estimate.
+* Some symbols are reused as loss coefficients. $\gamma_{\mathrm{ptx}}$ (PPO-ptx) and SimPO's margin $\gamma$ are not discount factors; the discount is $\gamma=1$ throughout. IPO's $\tau$ is a regularization strength, a departure from NOTATION.md, where $\tau$ is a temperature or a Polyak coefficient. The $\lambda$'s of Section 6 are loss weights, not the GAE parameter. The $\varepsilon_i$ of Section 2.2 are Gumbel noise variables and $\varepsilon_{\mathrm{KL}}$ in Section 3.3 a KL budget, not exploration rates.
+* $p$ denotes a generic probability: a preference probability in Sections 5–6 and a success rate in Section 9. The soft values of Section 3.5 are written $q^\ast_\beta,v^\ast_\beta$, lower-case as NOTATION.md prescribes for true (not estimated) value functions.
 
 ---
 
@@ -125,7 +127,7 @@ D_{\mathrm{KL}}\big(\pi(\cdot\mid x)\Vert\pi_{\mathrm{ref}}(\cdot\mid x)\big)
 \tag{18.5}
 $$
 
-(When the length $L$ is random, the second line still holds because the event "the response has not ended before $t$" is determined by $S_t$; Exercise 1 checks (18.5) numerically on a small tree.) The first line gives the cheap estimator used inside PPO-RLHF: sum the sampled per-token log-ratios. The second gives a lower-variance estimator that we use for every KL we *report*: sum the exact next-token KLs along sampled responses, which costs one extra forward pass but removes the token-sampling noise.
+(When the length $L$ is random, the second line still holds because the event "the response has not ended before $t$" is determined by $S_t$; Exercise 1 checks (18.5) numerically on a small tree.) The first line gives the cheap estimator used inside PPO-RLHF: sum the sampled per-token log-ratios. The second gives the estimator we use for every KL we *report*: sum the exact next-token KLs along sampled responses. It costs one extra forward pass, removes the per-step sampling noise of each term and is never negative. It is usually, though not always, the lower-variance of the two (Exercise 1).
 
 The KL in (18.4) is the *reverse* KL, $D_{\mathrm{KL}}(\pi_{\boldsymbol\theta}\Vert\pi_{\mathrm{ref}})$, whose direction matters ([Chapter 00](00-math-toolkit.md)). It is infinite if $\pi_{\boldsymbol\theta}$ puts mass where $\pi_{\mathrm{ref}}$ has none, and it allows $\pi_{\boldsymbol\theta}$ to drop modes of $\pi_{\mathrm{ref}}$. So the regularized policy may become *narrower* than the reference, but its support can never extend beyond the reference's.
 
@@ -184,7 +186,7 @@ So Bradley–Terry is what you get if people pick the better response up to Gumb
 
 Two consequences matter in practice.
 
-* **Rewards are identified only up to a prompt-dependent constant.** Replacing $r(x,y)$ by $r(x,y)+c(x)$ leaves (18.6) unchanged. A trained reward model therefore has an arbitrary offset per prompt, and implementations normalize it. InstructGPT, for example, shifted its reward model so that the reference demonstrations scored 0 on average.
+* **Rewards are identified only up to a prompt-dependent constant.** Replacing $r(x,y)$ by $r(x,y)+c(x)$ leaves (18.6) unchanged. A trained reward model therefore has an arbitrary offset per prompt, and implementations normalize it. InstructGPT, for example, shifted its reward model so that the labellers' demonstrations scored 0 on average.
 * **The scale is set by the noise.** A reward difference of 1 means "preferred 73% of the time" ($\sigma(1)=0.731$). There is no other unit.
 
 ### 2.3 The reward-model loss
@@ -243,8 +245,8 @@ A reward model scores two responses $r_\phi(x,y_A)=1.2$ and $r_\phi(x,y_B)=0.4$,
 
 | | val. accuracy | ceiling (true reward) | corr. with $r_{\mathrm{true}}$ on SFT samples |
 |---|---|---|---|
-| RM-2k (2,000 pairs, best epoch 6) | 0.717 | 0.744 | 0.826 |
-| RM-8k (8,000 pairs, best epoch 3) | 0.709 | 0.744 | 0.835 |
+| RM-2k (2,000 pairs; lowest validation loss after epoch 7 of 12) | 0.717 | 0.744 | 0.826 |
+| RM-8k (8,000 pairs; lowest validation loss after epoch 4 of 6) | 0.709 | 0.744 | 0.835 |
 
 On the distribution it was trained on, each reward model is close to the label-noise ceiling, and four times more data hardly changes that. Now ask both models about something they have almost never seen: the best word for a topic, repeated $1,2,3,5,9$ times. For topic 0, in standardized reward-model units:
 
@@ -265,7 +267,7 @@ Both reward models say "more is better" and the truth says the opposite. The sam
 Why not simply maximize $\mathbb E[r_\phi]$? There are three reasons.
 
 1. **The reward model is only trustworthy where it was trained.** It was fitted on samples from $\pi_{\mathrm{ref}}$. Far from that distribution its outputs are extrapolations, and an optimizer actively searches for the places where the extrapolation is too optimistic, as the table above suggests. The KL term keeps the policy where the reward model has data.
-2. **The reward does not capture everything we value.** Fluency, factual knowledge, diversity and the absence of degenerate text are largely inherited from pretraining. They are present in $\pi_{\mathrm{ref}}$ but not in the reward. Without a KL anchor, RL degrades them; early fine-tuning work without such a penalty saw models drift into fluent-looking but degenerate text.
+2. **The reward does not capture everything we value.** Fluency, factual knowledge, diversity and the absence of degenerate text are largely inherited from pretraining. They are present in $\pi_{\mathrm{ref}}$ but not in the reward. Without a KL anchor nothing in the objective protects them, and the policy is free to trade them away for reward, drifting toward text that exploits the reward model. Stiennon et al. (2020) described their penalty as serving two purposes: it acts like an entropy bonus that keeps the policy from collapsing to a single mode, and it keeps the policy's outputs close to those the reward model saw in training (reason 1 above).
 3. **It turns the problem into a well-posed one with a unique answer.** As we now show, the regularized problem has a closed-form solution that is a smooth reweighting of the reference policy, not a point mass.
 
 ### 3.2 The closed form
@@ -335,21 +337,21 @@ The closed form is over whole responses. What does $\pi^\ast_\beta$ do *token by
 
 $$
 \begin{aligned}
-Q^\ast(S_t,a)&=\begin{cases}r(x,y_{<t}a) & \text{if } a \text{ ends the response (EOS, or the budget is reached)},\\ V^\ast(S_{t+1}) & \text{otherwise, where } S_{t+1}=(x,y_{<t}a),\end{cases}\\
-V^\ast(S_t)&=\beta\log\sum_{a\in\mathcal V}\pi_{\mathrm{ref}}(a\mid S_t)\exp\!\big(Q^\ast(S_t,a)/\beta\big),
+q^\ast_\beta(S_t,a)&=\begin{cases}r(x,y_{<t}a) & \text{if } a \text{ ends the response (EOS, or the budget is reached)},\\ v^\ast_\beta(S_{t+1}) & \text{otherwise, where } S_{t+1}=(x,y_{<t}a),\end{cases}\\
+v^\ast_\beta(S_t)&=\beta\log\sum_{a\in\mathcal V}\pi_{\mathrm{ref}}(a\mid S_t)\exp\!\big(q^\ast_\beta(S_t,a)/\beta\big),
 \end{aligned}
 \tag{18.12}
 $$
 
-and the token policy $\pi^\ast(a\mid S_t)=\pi_{\mathrm{ref}}(a\mid S_t)\exp\big((Q^\ast(S_t,a)-V^\ast(S_t))/\beta\big)$, which is normalized by the definition of $V^\ast$. Multiply these token probabilities along a response $y$ of length $L$. The exponents telescope, because $Q^\ast(S_t,y_t)=V^\ast(S_{t+1})$ for $t<L$ and $Q^\ast(S_L,y_L)=r(x,y)$:
+and the token policy $\pi^\ast(a\mid S_t)=\pi_{\mathrm{ref}}(a\mid S_t)\exp\big((q^\ast_\beta(S_t,a)-v^\ast_\beta(S_t))/\beta\big)$, which is normalized by the definition of $v^\ast_\beta$. Multiply these token probabilities along a response $y$ of length $L$. The exponents telescope, because $q^\ast_\beta(S_t,y_t)=v^\ast_\beta(S_{t+1})$ for $t<L$ and $q^\ast_\beta(S_L,y_L)=r(x,y)$:
 
 $$
-\sum_{t=1}^{L}\big(Q^\ast(S_t,y_t)-V^\ast(S_t)\big)=r(x,y)-V^\ast(S_1),
+\sum_{t=1}^{L}\big(q^\ast_\beta(S_t,y_t)-v^\ast_\beta(S_t)\big)=r(x,y)-v^\ast_\beta(S_1),
 \qquad\text{so}\qquad
-\prod_{t=1}^{L}\pi^\ast(y_t\mid S_t)=\pi_{\mathrm{ref}}(y\mid x)\,e^{(r(x,y)-V^\ast(S_1))/\beta}.
+\prod_{t=1}^{L}\pi^\ast(y_t\mid S_t)=\pi_{\mathrm{ref}}(y\mid x)\,e^{(r(x,y)-v^\ast_\beta(S_1))/\beta}.
 $$
 
-This is (18.9) with $\beta\log Z_\beta(x)=V^\ast(S_1)$. So the sequence-level optimum is generated, token by token, by a softmax over soft $Q$-values with the reference as a prior. This is the soft Bellman equation of maximum-entropy RL ([Chapter 12](12-continuous-control-actor-critic.md)), with entropy replaced by KL to $\pi_{\mathrm{ref}}$. Rafailov et al. (2024a, "From $r$ to $Q^\ast$") used this to argue that a DPO-trained model's per-token log-ratios behave like a soft advantage, which provides some token-level credit assignment.
+This is (18.9) with $\beta\log Z_\beta(x)=v^\ast_\beta(S_1)$. So the sequence-level optimum is generated, token by token, by a softmax over soft action values with the reference as a prior. This is the soft Bellman equation of maximum-entropy RL ([Chapter 12](12-continuous-control-actor-critic.md)), with entropy replaced by KL to $\pi_{\mathrm{ref}}$. Rafailov et al. (2024a, "From $r$ to $Q^\ast$") used this to argue that a DPO-trained model's per-token log-ratios behave like a soft advantage, which provides some token-level credit assignment.
 
 ### 3.6 Checking it numerically
 
@@ -363,7 +365,7 @@ This is (18.9) with $\beta\log Z_\beta(x)=V^\ast(S_1)$. So the sequence-level op
 
 In every case $J_\beta(\pi^\ast_\beta)$ equals $\beta\log Z_\beta$ to the printed precision, all 1,000 random perturbations of $\pi^\ast_{0.5}$ score lower, and identity (18.10) holds to six decimals on a random policy.
 
-The sampled REINFORCE converges to machine precision at $\beta=2$, which needs an explanation. At the optimum, the KL-shaped reward $r(y)-\beta\log\frac{\pi^\ast_\beta(y)}{\pi_{\mathrm{ref}}(y)}$ equals $\beta\log Z_\beta$ for *every* $y$ (it is the first line of the proof of Theorem 18.1). With a leave-one-out baseline, every advantage is then exactly zero. The gradient estimator has zero variance at the solution, so the stochastic iteration settles exactly instead of jittering. At $\beta=0.1$ the iterate is still approaching the optimum when the decaying step size has become small. The left panel of the figure below shows the three solutions next to $\pi_{\mathrm{ref}}$. The other two panels belong to Sections 5.4 (with 6) and 8.3.
+The sampled REINFORCE converges to machine precision at $\beta=2$, which needs an explanation. At the optimum, the KL-shaped reward $r(y)-\beta\log\frac{\pi^\ast_\beta(y)}{\pi_{\mathrm{ref}}(y)}$ equals $\beta\log Z_\beta$ for *every* $y$ (it is the first line of the proof of Theorem 18.1). With a leave-one-out baseline, every advantage is then exactly zero. The gradient estimator has zero variance at the solution, so the stochastic iteration settles exactly instead of jittering. At $\beta=0.1$ the iterate is still approaching the optimum when the decaying step size has become small. The exact-gradient error of $2.1\times10^{-4}$ at $\beta=0.1$ is also an optimization effect, not a flaw in the closed form. In logit coordinates the curvature of $J_\beta$ along response $y$ is roughly $\beta\,\pi(y)$, and $\pi^\ast_{0.1}$ gives some responses probabilities as small as $2.5\times10^{-11}$. The problem is therefore badly conditioned, and plain gradient ascent converges slowly: 100,000 steps instead of 20,000 bring the error down to $3.0\times10^{-5}$. The left panel of the figure below shows the three solutions next to $\pi_{\mathrm{ref}}$. The other two panels belong to Sections 5.4 (with 6) and 8.3.
 
 ![The KL-regularized bandit: closed form vs solvers, DPO with deterministic preferences, and best-of-n vs the optimal frontier](../code/ch18_rl_for_language_models/figures/kl_bandit.png)
 
@@ -414,7 +416,7 @@ $$
 together with a squared-error loss for the value model toward the targets $\hat A_t+\hat v(S_t,\mathbf w_{\text{old}})$. [Chapter 11](11-trust-regions-and-ppo.md) derives the clipped surrogate and lists the implementation details. The ones specific to RLHF are:
 
 * **Two different KL terms.** The penalty in (18.14) pulls toward the *fixed* reference and changes the objective. PPO's clip keeps each update close to the *previous iterate* and only controls the step size. Confusing the two is a common bug.
-* **The value model** is a second network as large as the policy. InstructGPT initialized it from the reward model, which already "reads" responses; our toy does the same.
+* **The value model** in InstructGPT is a separate network, initialized from the reward model, which already "reads" responses; our toy does the same. Many implementations instead attach a scalar **value head** to the policy's own transformer trunk. This saves a whole network's memory and compute, but couples the two losses: value-loss gradients flow into the shared representation and can interfere with the policy, so the value-loss coefficient needs tuning. A separate value model avoids the interference at the cost of memory. (In our toy the critic starts from the *raw* reward model, while the rewards it predicts use the standardized score minus the KL penalty, so its initial values are off by an affine map that the value loss must correct first. Folding the normalization into the head's weight and bias would remove the mismatch from the start.)
 * **Advantage whitening** (normalizing $\hat A$ to zero mean and unit variance per batch), small learning rates and few epochs per batch are standard.
 * **Adaptive $\beta$.** Ziegler et al. (2019) adjusted $\beta$ with a proportional controller to hit a target KL. Exercise 11 implements one on the toy.
 * **PPO-ptx.** InstructGPT added the pretraining log-likelihood $\gamma_{\mathrm{ptx}}\mathbb E_{x\sim\mathcal D_{\mathrm{pretrain}}}[\log\pi_{\boldsymbol\theta}(x)]$ to the objective. RLHF had degraded performance on some standard NLP benchmarks, which the paper called an "alignment tax", and this term reduced the regression.
@@ -450,7 +452,7 @@ repeat for each iteration:
 
 ### 4.3 Dropping the critic: REINFORCE with a leave-one-out baseline
 
-PPO-RLHF trains four large networks at once: policy, reference, reward model and value model. The value model is the one that is easiest to remove. Draw $k$ responses $y_{i1},\dots,y_{ik}$ for each prompt $x_i$, compute their shaped rewards $\tilde r_{ij}$, and use the average of the *other* responses' rewards as the baseline:
+PPO-RLHF holds four large networks in memory (policy, reference, reward model and value model) and trains two of them, the policy and the value model. The value model is the one that is easiest to remove. Draw $k$ responses $y_{i1},\dots,y_{ik}$ for each prompt $x_i$, compute their shaped rewards $\tilde r_{ij}$, and use the average of the *other* responses' rewards as the baseline:
 
 $$
 \hat{\mathbf g}=\frac{1}{Bk}\sum_{i=1}^{B}\sum_{j=1}^{k}\big(\tilde r_{ij}-b_{ij}\big)\nabla_{\boldsymbol\theta}\log\pi_{\boldsymbol\theta}(y_{ij}\mid x_i),\qquad b_{ij}=\frac{1}{k-1}\sum_{l\ne j}\tilde r_{il}.
@@ -480,7 +482,7 @@ Let the value model predict $\hat v(S_1)=1.5$, $\hat v(S_2)=1.6$ and $\hat v(S_3
 * With $\lambda=1$ the advantages are Monte Carlo returns minus values: $\hat A_3=0.10$, $\hat A_2=0.32$, $\hat A_1=0.37$.
 * With $\lambda=0.95$: $\hat A_3=0.10$, $\hat A_2=0.22+0.95\times0.10=0.315$, $\hat A_1=0.05+0.95\times0.315=0.349$.
 
-The second token gets a larger advantage than the third, because the critic was pessimistic about the state it led to.
+The second token gets a larger advantage than the third because the critic was pessimistic about $S_2$, the state in which that token was chosen: it predicted 1.6 and the realized return was $G_2=1.92$. It was much less pessimistic about $S_3$ (1.8 predicted, 1.90 realized). In TD terms, the predicted value rises from 1.6 to 1.8 after the second token, and GAE credits that rise to it.
 
 ### 4.5 The toy: PPO and RLOO at the same KL coefficient
 
@@ -493,7 +495,7 @@ We start both methods from the SFT policy and optimize RM-2k with $\beta=0.1$. P
 | RLOO, $\beta=0.1$ | 3.052 | 1.64 | 3.92 | 2% | 4.85 | 10 s |
 | best achievable | 4.039 | | | | | |
 
-The two methods land at almost the same point, which is what the theory predicts: they optimize the same objective and the KL penalty pins down the solution. The true reward rises from 0.82 to about 3.0, roughly two thirds of the way to the optimum, at a cost of 4 nats of KL. RLOO used 102,400 samples with one gradient step per batch, while PPO used 30,720 samples with 16 minibatch steps per batch. PPO extracts more from each sample, and RLOO is simpler and cheaper per step.
+The two methods land at almost the same point, consistent with the theory, since both optimize the same regularized objective (with one seed and finite training, this is consistency, not a test of convergence). Two replications on fresh instances of the toy agree: there PPO and RLOO at $\beta=0.1$ finished within 0.01 of each other (Section 8.4). The true reward rises from 0.82 to about 3.0, roughly two thirds of the way to the optimum, at a cost of 4 nats of KL. RLOO used 102,400 samples with one gradient step per batch, while PPO used 30,720 samples with 16 minibatch steps per batch. PPO extracts more from each sample, and RLOO is simpler and cheaper per step.
 
 ---
 
@@ -534,7 +536,7 @@ Rafailov et al. also showed that nothing is lost by this parameterization. Call 
 
 ### 5.2 When does DPO find the RLHF solution?
 
-**Proposition 18.2.** Suppose preferences follow Bradley–Terry with reward $r_{\mathrm{true}}$, and for each prompt the compared pairs $(y,y')$ are drawn from a distribution $\mu(\cdot\mid x)\times\mu(\cdot\mid x)$ whose support is the whole (finite) response set. Then the policies with full support that minimize the population DPO loss are exactly $\pi^\ast_\beta$ of (18.9) for $r_{\mathrm{true}}$.
+**Proposition 18.2.** Suppose preferences follow Bradley–Terry with reward $r_{\mathrm{true}}$, and for each prompt the compared pairs $(y,y')$ are drawn from a distribution $\mu(\cdot\mid x)\times\mu(\cdot\mid x)$ whose support is the whole (finite) response set, and that $\pi_{\mathrm{ref}}(y\mid x)>0$ for all $y$ (otherwise $h$ is undefined and $\pi^\ast_\beta$ lacks full support). Then the policies with full support that minimize the population DPO loss are exactly $\pi^\ast_\beta$ of (18.9) for $r_{\mathrm{true}}$.
 
 *Proof.* Fix $x$ and an unordered pair $\{y,y'\}$. The label says $y$ wins with probability $p=\sigma(\Delta)$, where $\Delta=r_{\mathrm{true}}(x,y)-r_{\mathrm{true}}(x,y')$. The expected DPO loss on this pair is the cross-entropy $-p\log\sigma(\Delta_{\boldsymbol\theta})-(1-p)\log\sigma(-\Delta_{\boldsymbol\theta})$ with $\Delta_{\boldsymbol\theta}=\beta h_{\boldsymbol\theta}(x,y)-\beta h_{\boldsymbol\theta}(x,y')$. As a function of $\Delta_{\boldsymbol\theta}$, it is uniquely minimized at $\sigma(\Delta_{\boldsymbol\theta})=p$, that is, at $\Delta_{\boldsymbol\theta}=\Delta$, because cross-entropy exceeds entropy unless the two distributions agree. All pairs can attain their minimum simultaneously: take $\beta h(x,y)=r_{\mathrm{true}}(x,y)-c(x)$. Then $\pi(y\mid x)=\pi_{\mathrm{ref}}(y\mid x)e^{r_{\mathrm{true}}(x,y)/\beta}e^{-c(x)/\beta}$, and normalization forces $e^{c(x)/\beta}=Z_\beta(x)$, which gives $\pi^\ast_\beta$. Conversely, any minimizer must match every pairwise difference, so it has this form. $\square$
 
@@ -588,11 +590,11 @@ for epoch = 1..E:
 | DPO $\beta=1.0$ | 2.302 | 2.00 | 7% | 0.689 | $-1.1$ | $-2.2$ |
 | IPO $\tau=0.1$ | 2.539 | 2.87 | 11% | 0.685 | $-2.0$ | $-3.4$ |
 
-(The last two columns are average changes in log-probability, in nats, on the 1,000 held-out pairs.) Under PPO, the final KL ranges from 0.27 to 24.9 nats as $\beta$ goes from 1 to 0.01 (Section 8), because $\beta$ sets the solution. Under DPO, the KL is between 4.5 and 5.7 nats for every $\beta\le0.3$ and keeps growing with the number of epochs (middle panel below). How long you train matters about as much as $\beta$.
+(The last two columns are average changes in log-probability, in nats, on the 1,000 held-out pairs.) Under PPO, the final KL ranges from 0.27 to 24.9 nats as $\beta$ goes from 1 to 0.01 (Section 8), because $\beta$ sets the solution. Under DPO, the KL is between 4.5 and 5.7 nats for every $\beta\le0.3$ in this run (3.6 to 5.1 in the two replications of Section 8.4) and keeps growing with the number of epochs (middle panel below). How long you train matters about as much as $\beta$.
 
 **(c) Likelihood displacement.** The log-probability of the *chosen* responses falls, by 11.7 nats on average at $\beta=0.1$, while the rejected ones fall faster. The loss is satisfied, since the margin grows, but the probability mass goes to responses that are in neither column of the dataset. In this toy the displaced mass happened to land on better responses: the true reward of samples rose from 0.82 to 2.90. Nothing in the loss guarantees that, and Razin et al. (2025) analysed cases where it moves to undesirable outputs. Common remedies add a likelihood term on $y_w$ (as ORPO does, Section 6) or penalize decreases of $\log\pi(y_w)$ (DPOP; Pal et al., 2024).
 
-**(d) No exploration.** DPO can only rank the responses someone else generated. It never discovered the repetition hack in our toy (7–12% repeats versus 100% for PPO at small $\beta$), but for the same reason it can never find anything better than what is in the data. **Online** or **iterative** DPO samples new pairs from the current policy and labels them with a reward model or a judge, which restores some of RL's on-policy character. Controlled comparisons disagree about which family is better. Xu et al. (2024) found carefully tuned PPO ahead of DPO on several benchmarks, while DPO and its variants remain popular because they are simple and cheap. In this toy, at $\beta=0.1$, DPO reached a true reward of 2.90, against 2.96 for PPO and 3.05 for RLOO.
+**(d) No exploration.** DPO can only rank the responses someone else generated. It never collapsed onto the repetition hack in our toy (7–12% repeats, up from 1.1% for $\pi_{\mathrm{ref}}$, versus 100% for PPO at small $\beta$), but for the same reason it can never find anything better than what is in the data. **Online** or **iterative** DPO samples new pairs from the current policy and labels them with a reward model or a judge, which restores some of RL's on-policy character. Controlled comparisons disagree about which family is better. Xu et al. (2024) found carefully tuned PPO ahead of DPO on several benchmarks, while DPO and its variants remain popular because they are simple and cheap. In this toy, at $\beta=0.1$, DPO reached a true reward of 2.90, against 2.96 for PPO and 3.05 for RLOO. That small gap did not replicate: in two more seeds DPO finished 0.34 and 0.56 below PPO, and even its best $\beta$ fell short of PPO at $\beta=0.1$ (Section 8.4). In this toy, offline DPO on 2,000 pairs finished behind the online methods in every seed, by 0.07 to 0.56.
 
 **(e) Direct methods over-optimize too.** No explicit reward model means no explicit reward model to hack, but the implicit reward can still be exploited, for example through length. Rafailov et al. (2024b) found over-optimization curves for direct alignment algorithms similar to those of Section 8.
 
@@ -608,17 +610,23 @@ DPO started a family of "direct alignment" losses. Each fits an implicit reward 
 |---|---|---|---|
 | DPO (Rafailov et al., 2023) | pairs | $-\log\sigma\big(\beta h_{\boldsymbol\theta}(x,y_w)-\beta h_{\boldsymbol\theta}(x,y_l)\big)$ | yes |
 | IPO (Azar et al., 2024) | pairs | $\big(h_{\boldsymbol\theta}(x,y_w)-h_{\boldsymbol\theta}(x,y_l)-\tfrac{1}{2\tau}\big)^2$ | yes |
-| KTO (Ethayarajh et al., 2024) | single responses labelled desirable / undesirable | $\lambda_y-v(x,y)$, with $v=\lambda_D\,\sigma\big(\beta(h_{\boldsymbol\theta}(x,y)-z_0)\big)$ if desirable and $v=\lambda_U\,\sigma\big(\beta(z_0-h_{\boldsymbol\theta}(x,y))\big)$ if undesirable | yes |
+| KTO (Ethayarajh et al., 2024) | single responses labelled desirable / undesirable | $\lambda_y-v(x,y)$, with $v=\lambda_D\,\sigma\big(\beta(h_{\boldsymbol\theta}(x,y)-z_0)\big)$ if desirable and $v=\lambda_U\,\sigma\big(\beta(z_0-h_{\boldsymbol\theta}(x,y))\big)$ if undesirable, where $\lambda_y=\lambda_D$ for desirable and $\lambda_U$ for undesirable responses | yes |
 | SimPO (Meng, Xia & Chen, 2024) | pairs | $-\log\sigma\Big(\frac{\beta}{\lvert y_w\rvert}\log\pi_{\boldsymbol\theta}(y_w\mid x)-\frac{\beta}{\lvert y_l\rvert}\log\pi_{\boldsymbol\theta}(y_l\mid x)-\gamma\Big)$ | no |
-| ORPO (Hong, Lee & Thorne, 2024) | pairs | $-\log\pi_{\boldsymbol\theta}(y_w\mid x)-\lambda\log\sigma\Big(\log\frac{\mathrm{odds}_{\boldsymbol\theta}(y_w\mid x)}{\mathrm{odds}_{\boldsymbol\theta}(y_l\mid x)}\Big)$ | no |
+| ORPO (Hong, Lee & Thorne, 2024) | pairs | $-\frac{1}{\lvert y_w\rvert}\log\pi_{\boldsymbol\theta}(y_w\mid x)-\lambda\log\sigma\Big(\log\frac{\mathrm{odds}_{\boldsymbol\theta}(y_w\mid x)}{\mathrm{odds}_{\boldsymbol\theta}(y_l\mid x)}\Big)$ | no |
 
-**IPO** (Identity Preference Optimization) comes from a general framework, $\Psi$PO, that maximizes $\mathbb E[\Psi(p(y\succ\mu))]-\tau D_{\mathrm{KL}}(\pi\Vert\pi_{\mathrm{ref}})$, where $p(y\succ\mu)$ is the probability that $y$ beats a response drawn from the data distribution $\mu$. DPO corresponds to $\Psi(p)=\log\frac{p}{1-p}$, which is unbounded and so lets deterministic preferences drive the margin to infinity. IPO takes $\Psi$ to be the identity, which is bounded. Its optimum is $\pi(y)\propto\pi_{\mathrm{ref}}(y)\exp\big(p(y\succ\mu)/\tau\big)$, and the sampled loss in the table regresses each margin toward the finite target $1/(2\tau)$. To see why the regression gives this optimum, consider a pair labelled $y\succ y'$ with probability $p$. The expected squared loss as a function of the margin $m=h(y)-h(y')$ is $p(m-c)^2+(1-p)(-m-c)^2$ with $c=1/(2\tau)$, which is minimized at $m=(2p-1)c$. Averaging these targets over $y'\sim\mu$ gives $h(y)=p(y\succ\mu)/\tau+\text{const}$. In the deterministic-preference bandit, IPO's minimizer matches $\pi_{\mathrm{ref}}\exp(p(y\succ\pi_{\mathrm{ref}})/\tau)$ to within $10^{-9}$, with finite, $\tau$-dependent KLs of 1.281, 0.149 and 0.010 for $\tau=0.1,0.5,2$ (horizontal lines in the middle panel of the bandit figure). On the toy LM, IPO with $\tau=0.1$ moved the log-probabilities far less than DPO did (table above) and stayed closer to $\pi_{\mathrm{ref}}$, at some cost in true reward.
+**IPO** (Identity Preference Optimization) comes from a general framework, $\Psi$PO, which maximizes
+
+$$
+\mathbb E_{x\sim\mathcal D,\;y\sim\pi(\cdot\mid x),\;y'\sim\mu(\cdot\mid x)}\big[\Psi\big(p(y\succ y'\mid x)\big)\big]-\tau\,D_{\mathrm{KL}}(\pi\Vert\pi_{\mathrm{ref}}),
+$$
+
+where $p(y\succ y'\mid x)$ is the probability that $y$ is preferred to $y'$, $\mu$ is the distribution that generated the compared responses, and $\Psi$ is a non-decreasing function applied *inside* the expectation over $y'$. By Theorem 18.1 with reward $\mathbb E_{y'\sim\mu}[\Psi(p(y\succ y'))]$, the optimum is $\pi(y)\propto\pi_{\mathrm{ref}}(y)\exp\big(\mathbb E_{y'\sim\mu}[\Psi(p(y\succ y'))]/\tau\big)$. Under Bradley–Terry, $\Psi(p)=\log\frac{p}{1-p}$ gives $\Psi(p(y\succ y'))=r(y)-r(y')$, whose average over $y'$ is $r(y)+\text{const}$: this recovers RLHF and DPO. Because this $\Psi$ is unbounded, deterministic preferences ($p\in\{0,1\}$) drive the margin to infinity. IPO takes $\Psi$ to be the identity, which is bounded, so the exponent becomes $p(y\succ\mu)\doteq\mathbb E_{y'\sim\mu}[p(y\succ y')]$, the probability that $y$ beats a draw from $\mu$. Its optimum is $\pi(y)\propto\pi_{\mathrm{ref}}(y)\exp\big(p(y\succ\mu)/\tau\big)$, and the sampled loss in the table regresses each margin toward the finite target $1/(2\tau)$. To see why the regression gives this optimum, consider a pair labelled $y\succ y'$ with probability $p$. The expected squared loss as a function of the margin $m=h(y)-h(y')$ is $p(m-c)^2+(1-p)(-m-c)^2$ with $c=1/(2\tau)$, which is minimized at $m=(2p-1)c$. Averaging these targets over $y'\sim\mu$ gives $h(y)=p(y\succ\mu)/\tau+\text{const}$. In the deterministic-preference bandit, IPO's minimizer matches $\pi_{\mathrm{ref}}\exp(p(y\succ\pi_{\mathrm{ref}})/\tau)$ to within $10^{-9}$, with finite, $\tau$-dependent KLs of 1.281, 0.149 and 0.010 for $\tau=0.1,0.5,2$ (horizontal lines in the middle panel of the bandit figure). On the toy LM, IPO with $\tau=0.1$ moved the log-probabilities far less than DPO did (table above) and stayed closer to $\pi_{\mathrm{ref}}$, at some cost in true reward.
 
 **KTO** (Kahneman–Tversky Optimization) needs only a thumbs-up or thumbs-down per response, which is cheaper to collect than pairs. Its value function borrows the shape of prospect theory: outcomes are judged relative to a reference point $z_0$ (an estimate of the current KL to $\pi_{\mathrm{ref}}$, through which no gradient flows), with separate weights $\lambda_D,\lambda_U$ for gains and losses.
 
-**SimPO** drops the reference model and uses the *average* per-token log-probability as the implicit reward, plus a target margin $\gamma$. The length normalization counters DPO's tendency to favour long responses, whose summed log-ratios can be large. Without a reference, nothing anchors the policy except the data and early stopping. Exercise 12 runs SimPO on the toy. It ended close to DPO, with a smaller drop in the chosen responses' log-probability (4.3 versus 11.1 nats) but no clear advantage in true reward.
+**SimPO** drops the reference model and uses the *average* per-token log-probability as the implicit reward, plus a target margin $\gamma$. The length normalization counters DPO's tendency to favour long responses, whose summed log-ratios can be large. Without a reference, nothing anchors the policy except the data and early stopping. Exercise 12 runs SimPO on the toy. It ended close to DPO, with a smaller drop in the chosen responses' log-probability (4.3 versus 11.1 nats for DPO in the same run) but no clear advantage in true reward.
 
-**ORPO** (odds-ratio preference optimization) folds alignment into SFT. It adds to the usual negative log-likelihood of $y_w$ a term that raises the odds of $y_w$ relative to $y_l$, where $\mathrm{odds}(y\mid x)=\frac{P(y\mid x)}{1-P(y\mid x)}$ and $P$ is the length-normalized likelihood $\exp\big(\frac{1}{\lvert y\rvert}\log\pi_{\boldsymbol\theta}(y\mid x)\big)$. A single stage and a single model are needed.
+**ORPO** (odds-ratio preference optimization) folds alignment into SFT. It adds to the usual negative log-likelihood of $y_w$ (averaged over tokens, as in standard causal-LM training) a term that raises the odds of $y_w$ relative to $y_l$, where $\mathrm{odds}(y\mid x)=\frac{P(y\mid x)}{1-P(y\mid x)}$ and $P$ is the length-normalized likelihood $\exp\big(\frac{1}{\lvert y\rvert}\log\pi_{\boldsymbol\theta}(y\mid x)\big)$. A single stage and a single model are needed.
 
 (The $\lambda$'s in the table are loss weights, not the GAE parameter.) None of these losses is uniformly best. Reported comparisons depend heavily on the base model, the data and the tuning. The useful question to ask of a new variant is which of the four choices it changes, and which failure mode of Section 5.4 that change addresses.
 
@@ -662,7 +670,7 @@ Stage 2 (RL from AI feedback, "RL-CAI"):
 
 "When a measure becomes a target, it ceases to be a good measure" (Goodhart's law, in Strathern's phrasing). A reward model is a measure of quality fitted on one distribution of responses. Optimizing it moves the policy to another distribution, where the proxy and the real objective can come apart. Manheim and Garrabrant (2018) distinguished several mechanisms, two of which are visible in our toy:
 
-* **Regressional Goodhart.** The proxy is the true value plus noise, so selecting the very top of the proxy also selects for noise. Even a perfectly calibrated reward model over-rates the responses it ranks highest.
+* **Regressional Goodhart.** The proxy is the true value plus noise, so selecting the very top of the proxy also selects for noise. Even a reward model that is unbiased in the sense $\mathbb E[\text{proxy}\mid\text{true}]=\text{true}$ over-rates the responses it ranks highest, because the top of the proxy distribution is enriched for positive noise (the winner's curse, or regression to the mean). (A proxy that is *calibrated* in the other direction, $\mathbb E[\text{true}\mid\text{proxy}]=\text{proxy}$, does not over-rate its selections on average, but nothing guarantees that a learned reward model has either property.)
 * **Extremal Goodhart.** Optimization pushes into regions where the proxy–truth relationship learned on the training distribution no longer holds, as with repeated words in our toy.
 
 The resulting behaviour is called **reward hacking** (Skalse et al., 2022, give a formal definition). Documented cases in language models include responses that grow longer because reward models prefer length (Singhal et al., 2023), sycophancy, meaning agreement with the user's stated views (Sharma et al., 2024), and, in RL on coding tasks, special-casing or editing unit tests instead of fixing the code (Baker et al., 2025). [Chapter 01](01-the-rl-problem.md) gives the classic non-LLM examples.
@@ -698,6 +706,8 @@ $$
 \tag{18.23}
 $$
 
+With ties, the right side of (18.23) is the probability that the largest reward among the $n$ samples equals $r(y)$, that is, that the winner is *some* member of the tied class of $y$. Random tie-breaking then splits this probability within the class in proportion to $\pi_{\mathrm{ref}}$.
+
 **Its KL.** In the continuous limit, where every response has negligible probability, (18.23) has density $nF^{n-1}$ with respect to $\pi_{\mathrm{ref}}$. Then $D_{\mathrm{KL}}=\mathbb E_{\mathrm{BoN}}[\log(nF^{n-1})]=\log n+(n-1)\mathbb E[\log U]$, where $U=F(Y)$ for $Y\sim\pi_{\mathrm{BoN}}$ is distributed as the maximum of $n$ uniforms, with density $nu^{n-1}$ on $[0,1]$. Since $\mathbb E[\log U]=\int_0^1 nu^{n-1}\log u\,du=-1/n$,
 
 $$
@@ -707,19 +717,19 @@ $$
 
 This formula has long been quoted as *the* KL of best-of-$n$. Beirami et al. (2025) proved that in general it is only an **upper bound**, attained in the continuous limit. When some responses carry substantial probability, the true KL is smaller and saturates at $-\log\pi_{\mathrm{ref}}(y^\ast)$, the KL of always returning the single best response $y^\ast$. Our exact computation with [`kl_bandit.py`](../code/ch18_rl_for_language_models/kl_bandit.py) shows both regimes:
 
-| $n$ | 2 | 4 | 18 | 56 | 237 | 1000 |
+| $n$ | 2 | 4 | 16 | 64 | 256 | 1000 |
 |---|---|---|---|---|---|---|
-| $\log n-(n-1)/n$ | 0.193 | 0.636 | 1.946 | 3.043 | 4.472 | 5.909 |
-| exact, $K=10^4$ equiprobable responses | 0.193 | 0.636 | 1.946 | 3.043 | 4.472 | 5.908 |
-| exact, the $K=8$ bandit | 0.183 | 0.617 | 1.839 | 2.436 | 2.483 | 2.483 |
+| $\log n-(n-1)/n$ | 0.193 | 0.636 | 1.835 | 3.175 | 4.549 | 5.909 |
+| exact, $K=10^4$ equiprobable responses | 0.193 | 0.636 | 1.835 | 3.175 | 4.549 | 5.908 |
+| exact, the $K=8$ bandit | 0.183 | 0.617 | 1.746 | 2.457 | 2.483 | 2.483 |
 
 ![KL of best-of-n: exact values vs the log n - (n-1)/n formula](../code/ch18_rl_for_language_models/figures/bon_kl.png)
 
-**How good is best-of-$n$?** It cannot beat the optimal reward–KL frontier of Section 3.3, but it comes close. On the $K=10^4$ problem with Gaussian rewards (right panel of the bandit figure), best-of-$n$ reaches expected rewards of $1.044$, $1.832$, $2.305$ and $2.800$ for $n=4,16,64,256$. At the same KL, $\pi^\ast_\beta$ reaches $1.140$, $1.971$, $2.441$ and $2.912$. So best-of-$n$ gets between 92% and 96% of the optimal reward at each of these KL budgets, with no training at all.
+**How good is best-of-$n$?** It cannot beat the optimal reward–KL frontier of Section 3.3, but it comes close. On the $K=10^4$ problem with Gaussian rewards (right panel of the bandit figure), best-of-$n$ reaches expected rewards of $1.044$, $1.778$, $2.356$ and $2.823$ for $n=4,16,64,256$ (KL $0.636$, $1.835$, $3.175$ and $4.549$). At the same KL, $\pi^\ast_\beta$ reaches $1.140$, $1.916$, $2.490$ and $2.934$. So best-of-$n$ gets between 91% and 96% of the optimal reward at each of these KL budgets (91.5%, 92.8%, 94.6% and 96.2%), with no training at all.
 
 ### 8.4 Over-optimization in the toy
 
-Now the main experiment of [`rlhf_toy.py`](../code/ch18_rl_for_language_models/rlhf_toy.py). We run PPO against RM-2k for $\beta\in\{0.01,0.03,0.1,0.3,1\}$, PPO against RM-8k for $\beta\in\{0.01,0.1\}$, and best-of-$n$ with both reward models, and track three quantities: the true reward, the reward-model score, and what the reward model *predicts* the true reward to be. The prediction uses a linear map from RM score to true reward, fitted on $\pi_{\mathrm{ref}}$ samples. It is the reward model's own forecast, and its gap to the true reward is the over-optimization.
+Now the main experiment of [`rlhf_toy.py`](../code/ch18_rl_for_language_models/rlhf_toy.py) (seed 0, which produces the figures; the end of this section checks which conclusions survive two more seeds). We run PPO against RM-2k for $\beta\in\{0.01,0.03,0.1,0.3,1\}$, PPO against RM-8k for $\beta\in\{0.01,0.1\}$, and best-of-$n$ with both reward models, and track three quantities: the true reward, the reward-model score, and what the reward model *predicts* the true reward to be. The prediction uses a linear map from RM score to true reward, fitted on $\pi_{\mathrm{ref}}$ samples. It is the reward model's own forecast, and its gap to the true reward is the over-optimization.
 
 ![Over-optimization in the toy: true reward and reward-model forecast vs sqrt(KL) along PPO trajectories, and best-of-n](../code/ch18_rl_for_language_models/figures/rlhf_overoptimization.png)
 
@@ -735,16 +745,36 @@ Now the main experiment of [`rlhf_toy.py`](../code/ch18_rl_for_language_models/r
 
 Read the table together with the left panel of the figure.
 
-* **The proxy improves monotonically, the truth does not.** As $\beta$ falls, the reward-model score rises from 0.60 to 2.35 standard deviations. The true reward rises until $\beta=0.1$ and then falls. At $\beta=0.01$ the reward model forecasts a true reward of 3.44 while the policy actually earns 1.83.
+* **The proxy improves monotonically, the truth does not.** As $\beta$ falls, the reward-model score rises from 0.60 to 2.35 standard deviations. In this seed the true reward rises until $\beta=0.1$ and then falls. At $\beta=0.01$ the reward model forecasts a true reward of 3.44 while the policy actually earns 1.83.
 * **The hack is the blind spot of Section 2.5.** Every response of the $\beta=0.01$ policy repeats words, and responses get longer: exactly the behaviour the reward model never saw and over-rates.
 * **Too large a $\beta$ under-optimizes.** At $\beta=1$ the policy barely moves (0.27 nats) and gains little.
-* **Along a single run, the true reward peaks and falls.** For $\beta=0.01$ the true reward reaches 3.08 at iteration 20, at a KL of 7.4 nats, as good as the best point of any run. It then decays to 1.83 while the KL climbs to 24.9. All trajectories lie on roughly the same curve of true reward versus $\sqrt{\mathrm{KL}}$ until they peel off. As in Gao et al., the KL penalty acts here much like early stopping: its value is that you do not need to know *when* to stop, because the regularized objective has its optimum near the peak.
+* **Along a single run, the true reward peaks and falls.** For $\beta=0.01$ the true reward reaches 3.08 at iteration 20, at a KL of 7.4 nats, in this seed as good as the best point of any run. It then decays to 1.83 while the KL climbs to 24.9. All trajectories lie on roughly the same curve of true reward versus $\sqrt{\mathrm{KL}}$ until they peel off. As in Gao et al., the KL penalty acts here much like early stopping: its value is that you do not need to know *when* to stop, because the regularized objective has its optimum near the peak.
 
-**More data does not fix a blind spot.** With RM-8k (right panel), PPO at $\beta=0.1$ reaches a true reward of 3.482, against 2.963 with RM-2k, at a KL of 5.07. The better reward model is better where the policy actually goes, even though its validation accuracy on $\pi_{\mathrm{ref}}$ pairs was no higher. But at $\beta=0.01$ it collapses just the same: the true reward peaks at 3.35 (at a KL of 6.6) and ends at 2.02, with 100% repeats and a KL of 29.9. Four times more data drawn from the same distribution still contains almost no repetition.
+**More data does not fix a blind spot.** With RM-8k (right panel), PPO at $\beta=0.1$ reaches a true reward of 3.482, against 2.963 with RM-2k, at a KL of 5.07. In this seed the bigger reward model is better where the policy actually goes, even though its validation accuracy on $\pi_{\mathrm{ref}}$ pairs was no higher (that advantage did not replicate in every seed; see below). But at $\beta=0.01$ it collapses just the same: the true reward peaks at 3.35 (at a KL of 6.6) and ends at 2.02, with 100% repeats and a KL of 29.9. Four times more data drawn from the same distribution still contains almost no repetition.
 
-**Best-of-$n$ did not over-optimize here.** With RM-2k, the true reward of the selected sample rises monotonically: 0.78, 1.90, 2.55, 2.91, 3.09 and 3.10 for $n=1,4,16,64,256,512$, at KLs of at most 5.24 nats. With RM-8k it reaches 3.49 at $n=512$. Picking the best of 512 samples by the true reward itself gives 3.79. At comparable KL, best-of-$n$ is as good as PPO: $n=128$ (KL $\le3.86$) gives 3.00 versus 2.96 for PPO at $\beta=0.1$ (KL 3.96). Best-of-$n$ cannot reach the hack, because it only ever returns samples that $\pi_{\mathrm{ref}}$ itself produces, and $\pi_{\mathrm{ref}}$ rarely repeats words. Gao et al. did see best-of-$n$ over-optimize, at larger $n$. Whether and when it happens depends on how often $\pi_{\mathrm{ref}}$ samples the responses that the proxy over-rates.
+**Best-of-$n$ did not over-optimize here.** With RM-2k, the true reward of the selected sample rises monotonically: 0.78, 1.90, 2.55, 2.91, 3.09 and 3.10 for $n=1,4,16,64,256,512$, at KLs of at most 5.24 nats. With RM-8k it reaches 3.49 at $n=512$. Picking the best of 512 samples by the true reward itself gives 3.79. Since $\log n-(n-1)/n$ is only an upper bound (Section 8.3), the script also estimates the exact KL of best-of-$n$: by (18.23), $\pi_{\mathrm{BoN}}(y)/\pi_{\mathrm{ref}}(y)=\big((F(y^-)+\pi_{\mathrm{ref}}(y))^n-F(y^-)^n\big)/\pi_{\mathrm{ref}}(y)$, with $\pi_{\mathrm{ref}}(y)$ computed exactly from the model and $F(y^-)$ estimated from the roughly 65,000 reference samples drawn per prompt. (On the $K=8$ bandit this estimator recovers the exact KL, 2.45 against 2.457 at $n=64$, where the bound says 3.175.) In this run the estimate agrees with the bound to within 0.06 nats at every $n$ (the largest gaps in seeds 1 and 2 below are 0.09 and 0.30 nats, both at $n=512$): the responses the reward model ranks highest are individually rare, so the continuous-limit formula is nearly exact here. The figure plots best-of-$n$ at the estimated KL, with the bound as open circles, which almost coincide. At comparable KL, best-of-$n$ is as good as PPO: $n=128$ (KL 3.85) gives 3.00 versus 2.96 for PPO at $\beta=0.1$ (KL 3.96). Best-of-$n$ cannot reach the hack, because it only ever returns samples that $\pi_{\mathrm{ref}}$ itself produces, and $\pi_{\mathrm{ref}}$ rarely repeats words. Gao et al. did see best-of-$n$ over-optimize, at larger $n$. Whether and when it happens depends on how often $\pi_{\mathrm{ref}}$ samples the responses that the proxy over-rates.
 
 ![Final true reward, KL and repetition rate vs beta for PPO, RLOO and DPO](../code/ch18_rl_for_language_models/figures/rlhf_beta_sweep.png)
+
+**Which of these conclusions survive other seeds?** Everything above comes from one run. `python code/ch18_rl_for_language_models/rlhf_toy.py --seed 1` (and `--seed 2`) repeats the whole pipeline on a fresh instance of the toy: new hidden reward weights and demonstration distribution, new SFT model, new preference data, new reward models, new training noise. Final true rewards:
+
+| | seed 0 (above) | seed 1 | seed 2 |
+|---|---|---|---|
+| $\pi_{\mathrm{ref}}$ / best achievable | 0.818 / 4.039 | $-0.098$ / 3.657 | 0.196 / 3.604 |
+| PPO (RM-2k), $\beta=0.01$ | 1.830 | 1.713 | 1.242 |
+| PPO (RM-2k), $\beta=0.03$ | 2.508 | **2.635** | 2.277 |
+| PPO (RM-2k), $\beta=0.1$ | **2.963** | 2.597 | **2.912** |
+| PPO (RM-2k), $\beta=0.3$ | 2.375 | 1.672 | 2.439 |
+| PPO (RM-2k), $\beta=1$ | 1.578 | 0.555 | 1.075 |
+| PPO $\beta=0.01$: peak along the run → final (repeats at the end) | 3.076 → 1.830 (100%) | 2.243 → 1.713 (100%) | 2.553 → 1.242 (100%) |
+| PPO $\beta=0.01$: RM's forecast of the final true reward | 3.44 | 2.00 | 4.14 |
+| RLOO, $\beta=0.1$ | 3.052 | 2.607 | 2.902 |
+| DPO, $\beta=0.1$ (best $\beta$ in the sweep) | 2.897 (2.897 at 0.1) | 2.254 (2.338 at 0.3) | 2.353 (2.459 at 0.3) |
+| PPO with RM-8k, $\beta=0.1$ | 3.482 | 2.972 | 2.865 |
+| PPO with RM-8k, $\beta=0.01$ (repeats at the end) | 2.020 (100%) | 2.212 (83%) | 1.847 (100%) |
+| best-of-128 with RM-2k (estimated KL) | 3.001 (3.85) | 2.730 (3.82) | 2.788 (3.82) |
+
+What replicated in all three seeds: at $\beta=0.01$ the policy ends up repeating words in every response, its true reward peaks and then falls while the reward model forecasts more than the policy earns; the final true reward is highest at $\beta=0.1$ or $0.03$ (so "the peak is at $\beta\approx0.03$–$0.1$", not exactly at 0.1); $\beta=1$ under-optimizes; PPO and RLOO at $\beta=0.1$ finish within 0.09 of each other; best-of-128 is within 0.15 of PPO at $\beta=0.1$ at a similar KL; and RM-8k still collapses at $\beta=0.01$ (83–100% repeats). What did not replicate: the $\beta=0.01$ peak was as good as the best run only in seed 0. RM-8k beat RM-2k at $\beta=0.1$ by 0.52 and 0.38 in seeds 0 and 1 but not in seed 2 ($-0.05$), where early stopping kept RM-8k after only 3 of its 6 epochs and it correlated less with the true reward on $\pi_{\mathrm{ref}}$ samples than RM-2k did (0.686 against 0.787). And DPO's gap to PPO, 0.07 at $\beta=0.1$ in seed 0, was 0.34 and 0.56 in seeds 1 and 2: DPO finished below PPO and RLOO in all three, and even its best $\beta$ fell short of PPO at $\beta=0.1$.
 
 ### 8.5 What to do about it
 
@@ -800,15 +830,15 @@ $$
 \tag{18.27}
 $$
 
-which is the non-negative, unbiased $k_3$ estimator of [Chapter 11](11-trust-regions-and-ppo.md), Section 8.5. Compared with PPO-RLHF there are three differences: no value model, a group-standardized advantage, and the KL as a separate term in the loss rather than inside the reward. Keeping the KL out of the reward keeps it out of the advantage normalization. DeepSeekMath used $G=64$, a learning rate of $10^{-6}$, $\beta=0.04$ and one policy update per batch of samples. Its rewards came from a learned reward model, with both outcome and process variants (Section 11). GRPO raised the instruction-tuned DeepSeekMath-7B from 82.9% to 88.2% on GSM8K and from 46.8% to 51.7% on MATH.
+which is the non-negative $k_3$ estimator of [Chapter 11](11-trust-regions-and-ppo.md), Section 8.5. It is unbiased for $D_{\mathrm{KL}}(\pi_{\boldsymbol\theta}\Vert\pi_{\mathrm{ref}})$ when the tokens are sampled from $\pi_{\boldsymbol\theta}$; here they come from $\pi_{\boldsymbol\theta_{\text{old}}}$, so it is exact only at the first update on a batch. Compared with PPO-RLHF there are three differences: no value model, a group-standardized advantage, and the KL as a separate term in the loss rather than inside the reward. Keeping the KL out of the reward keeps it out of the advantage normalization. DeepSeekMath used $G=64$, a learning rate of $10^{-6}$, $\beta=0.04$ and one policy update per batch of samples (with a single update, $\rho=1$ and the clip is never active). Its rewards came from a learned reward model, with both outcome and process variants (Section 11). GRPO raised the instruction-tuned DeepSeekMath-7B from 82.9% to 88.2% on GSM8K and from 46.8% to 51.7% on MATH.
 
-**A subtlety about the KL term.** Differentiate (18.27) with respect to $\boldsymbol\theta$ at a fixed state, writing $q=\pi_{\mathrm{ref}}(a\mid S)$ and $p=\pi_{\boldsymbol\theta}(a\mid S)$. Then $\nabla_{\boldsymbol\theta}\hat D=(1-q/p)\nabla\log p$, and the expectation over $a\sim p$ is
+**A subtlety about the KL term.** Differentiate (18.27) with respect to $\boldsymbol\theta$ at a fixed state $S$, writing $\pi_a=\pi_{\boldsymbol\theta}(a\mid S)$ and $\bar\pi_a=\pi_{\mathrm{ref}}(a\mid S)$. Then $\nabla_{\boldsymbol\theta}\hat D=(1-\bar\pi_a/\pi_a)\nabla\log\pi_a$, and the expectation over $a\sim\pi_{\boldsymbol\theta}(\cdot\mid S)$ is
 
 $$
-\sum_a p\Big(1-\frac{q}{p}\Big)\nabla\log p=\sum_a(p-q)\nabla\log p=-\sum_a q\,\nabla\log p=\nabla_{\boldsymbol\theta}D_{\mathrm{KL}}(\pi_{\mathrm{ref}}\Vert\pi_{\boldsymbol\theta}),
+\sum_a \pi_a\Big(1-\frac{\bar\pi_a}{\pi_a}\Big)\nabla\log\pi_a=\sum_a(\pi_a-\bar\pi_a)\nabla\log\pi_a=-\sum_a \bar\pi_a\,\nabla\log\pi_a=\nabla_{\boldsymbol\theta}D_{\mathrm{KL}}(\pi_{\mathrm{ref}}\Vert\pi_{\boldsymbol\theta}),
 $$
 
-using $\sum_a p\nabla\log p=0$. Differentiating the $k_3$ *value estimate* as a loss therefore gives, in expectation, the gradient of the *forward* KL $D_{\mathrm{KL}}(\pi_{\mathrm{ref}}\Vert\pi_{\boldsymbol\theta})$ at each visited state, and it ignores how $\boldsymbol\theta$ changes which states are visited. The reverse KL that (18.4) is written with is what the KL-in-reward form (18.13) optimizes. Both are reasonable regularizers, but they are not the same one. An estimator that is unbiased for a quantity does not, in general, have a gradient that is unbiased for that quantity's gradient. Exercise 10 asks you to verify this.
+using $\sum_a \pi_a\nabla\log\pi_a=0$. Differentiating the $k_3$ *value estimate* as a loss therefore gives, in expectation, the gradient of the *forward* KL $D_{\mathrm{KL}}(\pi_{\mathrm{ref}}\Vert\pi_{\boldsymbol\theta})$ at each visited state, and it ignores how $\boldsymbol\theta$ changes which states are visited. The reverse KL that (18.4) is written with is what the KL-in-reward form (18.13) optimizes. Both are reasonable regularizers, but they are not the same one. An estimator that is unbiased for a quantity does not, in general, have a gradient that is unbiased for that quantity's gradient. Exercise 10 asks you to verify this.
 
 ```text
 Algorithm 18.7  Group-relative policy optimization and its variants
@@ -830,8 +860,10 @@ repeat:
             seq_mean: (1/#responses) sum_i (1/|y_i|) sum_t l_it        # GRPO (18.26)
             token:    sum_{i,t} l_it / sum_i |y_i|                      # DAPO (18.29)
             const:    sum_{i,t} l_it / (#responses * T_max)             # Dr. GRPO (18.28)
-            seq_sum:  (1/#responses) sum_i sum_t l_it                   # plain REINFORCE
+            seq_sum:  (1/#responses) sum_i sum_t l_it                   # REINFORCE (with no clip)
         gradient step on theta
+    # with no clip and K * minibatches > 1 steps per batch, only the first step is REINFORCE;
+    # later steps use per-token ratios, a biased off-policy surrogate (Section 9.4)
 ```
 
 ### 9.3 What the 2025 analyses changed
@@ -882,7 +914,7 @@ The **verifier** returns 1 if the response ends with EOS and its last digit equa
 
 The base model (an 87,019-parameter GRU) is trained by maximum likelihood on noisy demonstrations. The noise has two parts. A *systematic* "carry bug": when a running sum exceeds 9, the demonstrator writes the units digit plus one with probability 0.6 ($7+5=12\to3$). And *random* slips: otherwise, the digit is off by $\pm1$ with probability 0.05. Errors propagate to later steps. The base model learns this distribution faithfully. Its sampled accuracy is 0.360, against 0.372 for the demonstrations themselves, falling from 0.68 for $n=2$ to 0.15 for $n=6$. Its greedy accuracy is only 0.218, because at a carry step the most likely digit is the *wrong* one. This is the setting of a pretrained model before RLVR: it can produce correct solutions, but not reliably, and its most likely answer is often wrong.
 
-We compare six update rules (Algorithm 18.7) that differ only in their knobs. All use $G=8$, 32 prompts per batch, learning rate $10^{-3}$, 2 epochs of 2 minibatches per batch and 200 iterations, with 3 seeds each. REINFORCE and RLOO run without clipping or KL; GRPO, Dr. GRPO and GRPO+PRM use $\epsilon=0.2$ and $\beta=0.04$; DAPO-lite is DAPO without overlong shaping, which our short responses never need. Accuracy is measured on 500 fixed problems (100 per length), with 4 samples each at temperature 1.
+We compare six update rules (Algorithm 18.7) that differ only in their knobs, plus two ablations. All use $G=8$, 32 prompts per batch, learning rate $10^{-3}$, 2 epochs of 2 minibatches per batch and 200 iterations, with 3 seeds each. REINFORCE and RLOO run without clipping or KL; GRPO and GRPO+PRM use $\epsilon=0.2$ and $\beta=0.04$; Dr. GRPO uses $\epsilon=0.2$ and no KL term, as in (18.28); DAPO-lite is DAPO without overlong shaping, which our short responses never need. The two ablations separate the KL term from the normalizations: GRPO with $\beta=0$, and Dr. GRPO with GRPO's $\beta=0.04$. Accuracy is measured on 500 fixed problems (100 per length), with 4 samples each at temperature 1 (16 for the base model).
 
 | method | sampled accuracy (mean, min–max over 3 seeds) | greedy acc. | acc. at $n=6$ | KL to base | token entropy | valid chain among correct | responses sampled |
 |---|---|---|---|---|---|---|---|
@@ -890,17 +922,19 @@ We compare six update rules (Algorithm 18.7) that differ only in their knobs. Al
 | REINFORCE (no baseline) | 0.631 (0.609–0.643) | 0.743 | 0.243 | 2.77 | 0.295 | 0.862 | 51,200 |
 | RLOO | 0.616 (0.578–0.635) | 0.731 | 0.231 | 2.85 | 0.317 | 0.870 | 51,200 |
 | GRPO | 0.700 (0.694–0.707) | 0.851 | 0.340 | 1.62 | 0.264 | 0.915 | 51,200 |
-| Dr. GRPO | 0.670 (0.663–0.684) | 0.833 | 0.294 | 1.49 | 0.295 | 0.904 | 51,200 |
+| GRPO, $\beta=0$ (ablation) | 0.707 (0.688–0.718) | 0.825 | 0.333 | 1.93 | 0.252 | 0.905 | 51,200 |
+| Dr. GRPO ($\beta=0$) | 0.695 (0.680–0.710) | 0.814 | 0.297 | 1.99 | 0.261 | 0.893 | 51,200 |
+| Dr. GRPO, $\beta=0.04$ (ablation) | 0.670 (0.663–0.684) | 0.833 | 0.294 | 1.49 | 0.295 | 0.904 | 51,200 |
 | DAPO-lite | 0.739 (0.732–0.745) | 0.856 | 0.350 | 1.84 | 0.231 | 0.902 | 102,912 |
 | GRPO + process reward | **0.773** (0.749–0.788) | 0.905 | 0.427 | 1.49 | 0.189 | 0.951 | 51,200 |
 
-![RL with a verifier: accuracy, KL, entropy and the fraction of no-signal groups vs the number of sampled responses, for six update rules](../code/ch18_rl_for_language_models/figures/grpo_rlvr_curves.png)
+![RL with a verifier: accuracy, KL, entropy and the fraction of no-signal groups vs the number of sampled responses, for six update rules and two ablations (dashed); shaded bands are min–max over 3 seeds](../code/ch18_rl_for_language_models/figures/grpo_rlvr_curves.png)
 
 What the experiment shows, and what it does not:
 
 * **RL fixes the systematic error.** Every method raises sampled accuracy from 0.36 to between 0.62 and 0.77 within 51,200 samples, and greedy accuracy jumps from 0.22 to 0.73–0.91. The policy has learned to prefer the correct digit at carry steps, the step where the base model's mode was wrong. That was possible because the correct digit already had probability of about 0.4 under the base model: RL could sample it and reinforce it.
-* **The clipped, regularized updates did better here.** GRPO, Dr. GRPO and their relatives reached higher accuracy at lower KL than REINFORCE and RLOO. Those two take the same four gradient steps per batch but without a trust region or a KL anchor, and they drift further (2.8 nats) for less gain. In this toy the comparison is mostly about that, not about the baseline: RLOO's baseline did not help over REINFORCE with 0/1 rewards here.
-* **GRPO beat Dr. GRPO by 0.03.** All three GRPO seeds finished above all three Dr. GRPO seeds. This does not contradict Liu et al. Response lengths in this task are fixed by the problem, so the length bias has nothing to act on. And the std normalization *up-weights* low-variance prompts, which here include the hard long problems that still had room to improve. Our guess, not tested further, is that this weighting helped on this task. The biases Dr. GRPO describes are real properties of the objective. Whether removing them helps accuracy depends on the task, and their main reported benefit was token efficiency.
+* **The clipped updates did better here, and the KL term is not why.** GRPO, Dr. GRPO and their relatives reached higher accuracy at lower KL than REINFORCE and RLOO. Those two take the same four minibatch steps per batch with an unclipped per-token importance ratio and no KL term. After the first minibatch step this is a (biased) off-policy surrogate rather than REINFORCE proper, and with no trust region they drift further (2.8 nats) for less gain. Removing the KL term from GRPO did not hurt: GRPO with $\beta=0$ reached 0.707, against 0.700 with it, at a higher KL (1.93 against 1.62). Dr. GRPO, which has no KL term, reached 0.695. What separates these from RLOO is the clipped ratio and the loss normalization (RLOO sums token losses per response; Dr. GRPO divides the same sum by a constant). We did not ablate the two separately. With Adam a constant rescaling of the loss matters little (although it interacts with our gradient-norm clipping), so the clip is the more likely cause. RLOO's baseline did not help over REINFORCE with 0/1 rewards here.
+* **GRPO against Dr. GRPO: a confounded comparison, then a tie.** With the same $\beta=0.04$, GRPO finished 0.03 above Dr. GRPO (0.700 against 0.670), and all three GRPO seeds above all three Dr. GRPO seeds. But that comparison is confounded. Without std normalization, Dr. GRPO's advantages are 2–3 times smaller ($\lvert r_i-\bar r\rvert$ is about 0.3–0.5 for binary rewards, against about 1 after standardization), while the $k_3$ penalty is added per token with the same $\beta$. So the same $\beta$ regularizes Dr. GRPO relatively more, and indeed its KL (1.49) is the lowest in the table. With $\beta=0$ for both, as in (18.28), the gap shrinks to 0.012 (0.707 against 0.695) and the seed ranges overlap (0.688–0.718 and 0.680–0.710). Three seeds cannot resolve a difference that small. None of this bears on Liu et al.'s main point: response lengths in this task are fixed by the problem, so the length bias has nothing to act on, and their main reported benefit was token efficiency. The lesson for reading such comparisons is that a penalty coefficient tuned for one advantage scale is not equivalent under another.
 * **DAPO-lite is better per update and worse per sample.** It reached 0.739 after 200 updates, but dynamic sampling drew about twice as many responses. At the budget of the other methods (51,200 responses) it stood at 0.646, below GRPO's 0.700. Its entropy is the *lowest* of the outcome-reward methods, so in this toy clip-higher did not prevent entropy from falling; it also had no KL term.
 * **Zero-signal groups first become rarer, then more common** (right panel). At the start, 24% of the groups are all-wrong or all-right. That share first drops to about 15%, as hard problems stop being all-wrong, and then climbs to 36% over the last 20 iterations for GRPO (32–39% for the other outcome-reward methods), as short problems become "always solved" and stop contributing. (For GRPO+PRM the fraction, 46%, counts groups with identical *outcomes*; their step rewards still differ, so they still carry signal.)
 * **Process rewards helped most**, which is the subject of Section 11.
@@ -929,7 +963,7 @@ In September 2024 OpenAI announced o1, a model trained with large-scale reinforc
 DeepSeek-AI's R1 report (arXiv, January 2025; peer-reviewed version in *Nature*, September 2025) described an open recipe in detail.
 
 * **DeepSeek-R1-Zero** applied GRPO directly to the pretrained DeepSeek-V3-Base, with **no** supervised fine-tuning first. The rewards were rule-based: an accuracy reward (answer checking for mathematics, test cases for code) and a format reward for putting the reasoning between designated thinking tags. Neural reward models were deliberately avoided because of reward hacking at scale. During training the average response length grew steadily, and behaviours such as re-checking and backtracking ("wait, ...") emerged. The paper highlights an "aha moment" in which the model re-evaluated its own approach mid-solution. R1-Zero's outputs suffered from poor readability and language mixing.
-* **DeepSeek-R1** added stages around RL: a small "cold-start" SFT set of long chain-of-thought examples; reasoning-focused RL with an additional language-consistency reward; rejection sampling from the RL checkpoint to build a new SFT set of roughly 600k reasoning and 200k non-reasoning examples; SFT on that; and a final RL stage covering all scenarios, with rule-based rewards for reasoning and reward models for helpfulness and harmlessness.
+* **DeepSeek-R1** added stages around RL: a small "cold-start" SFT set of long chain-of-thought examples; reasoning-focused RL with an additional language-consistency reward; rejection sampling from the RL checkpoint to build a new SFT set of roughly 600k reasoning and 200k non-reasoning examples; SFT of DeepSeek-V3-Base (not of the RL checkpoint) on that ~800k set; and a final RL stage covering all scenarios, with rule-based rewards for reasoning and reward models for helpfulness and harmlessness.
 * **Distillation.** Fine-tuning smaller open models (Qwen and Llama families) on R1's outputs produced strong small reasoning models. The paper reports that this worked better than running large-scale RL on the small models directly.
 * **Negative results.** The report lists process reward models and Monte Carlo tree search as attempts that did not pay off at their scale (Section 11).
 
@@ -937,10 +971,7 @@ DeepSeek-AI's R1 report (arXiv, January 2025; peer-reviewed version in *Nature*,
 
 Theorem 18.1's support constraint says that KL-regularized RL reweights what the reference can already produce. RLVR as practised (sometimes with no KL at all, and with long training) is not bound by the theorem exactly, but the question it raises is empirical: does RL *discover* reasoning strategies, or does it *sharpen* the model's distribution toward solutions it could already sample?
 
-* Yue et al. (2025) compared base and RLVR-trained models by pass@$k$, the probability that at least one of $k$ samples is correct. RL models won at small $k$, but base models matched or beat them at large $k$. Their interpretation is that RLVR mostly concentrates probability on already-reachable solutions while narrowing the set of problems solved at all.
-* Liu et al. (2025, ProRL) reported that much longer RL training, with KL control and periodic resets of the reference policy, does expand pass@$k$ on some tasks, including tasks where the base model fails at any $k$.
-* Token entropy typically collapses early in RLVR, and performance saturates with it. Cui et al. (2025) analysed the mechanism and proposed covariance-based fixes ([Chapter 14](14-exploration.md), Section 13, discusses these as exploration problems).
-* A further caution came from Shao et al. (2025), who reported that some base models (in the Qwen2.5-Math family) improved under RLVR even with random or incorrect rewards, while other model families did not. When the base model already has the behaviour, almost any push that makes it more deterministic can help, and the gain says more about the base model than about the reward.
+[Chapter 14](14-exploration.md), Section 13, reviews the evidence on both sides, which we only summarize. Yue et al. (2025) found that RLVR-trained models win in pass@$k$ (the probability that at least one of $k$ samples is correct) at small $k$, while base models match or beat them at large $k$: RL mostly concentrates probability on solutions that were already reachable. Liu et al. (2025, ProRL) found that much longer training, with KL control and periodic resets of the reference policy, does expand pass@$k$ on some tasks. Cui et al. (2025) analysed the early collapse of token entropy that accompanies the sharpening. A further caution is specific to language models. Shao et al. (2025) reported that some base models (in the Qwen2.5-Math family) improved under RLVR even with random or incorrect rewards, while other model families did not. Their analysis suggests that the gains come from amplifying behaviours the base model already has (for Qwen2.5-Math, reasoning written as code), in part through the clipping bias of GRPO, so the gain says more about the base model than about the reward.
 
 Our toy is a clean instance of sharpening. The base model solves 99.8% of the problems within 64 samples (only 1 problem in 500 is never solved), and RL brings pass@1 from 0.36 to about 0.70–0.77 (Section 12 has the full pass@$k$ curves). What RL fixed, the carry bug, was a matter of which digit was *most* likely, not of which digits were possible. An honest summary of the evidence is: RLVR reliably converts "can sometimes" into "usually does"; whether and when it goes beyond the base model's reach at practical $k$ is an open question.
 
@@ -952,7 +983,7 @@ An **outcome reward model** (ORM) or verifier scores only the final answer. A **
 
 **Evidence for process supervision.** Uesato et al. (2022) compared the two on grade-school maths (GSM8K). Final-answer accuracy was similar, but process-based feedback (or a reward model trained to emulate it) was needed to reduce *reasoning* errors, meaning correct answers reached by faulty steps. Lightman et al. (2024, "Let's Verify Step by Step") collected PRM800K, about 800,000 human step-level labels on solutions to MATH problems, and found that a process-supervised reward model selected correct solutions from many candidates substantially better than an outcome-supervised one.
 
-**Process rewards without humans.** Labelling steps by hand is expensive. Math-Shepherd (Wang et al., 2024) labels a step by *rolling out* several completions from it and checking how often they reach the correct answer. That Monte Carlo estimate is exactly the value $v_\pi(S_t)$ of the partial solution under the rollout policy. A PRM trained this way is a learned value function, and the "progress" a step makes, the change in that value, is an advantage. Setlur et al. (2025) developed this view into process *advantage* verifiers. The circle closes back to actor-critic methods ([Chapter 10](10-policy-gradients.md)).
+**Process rewards without humans.** Labelling steps by hand is expensive. Math-Shepherd (Wang et al., 2024) labels a step by *rolling out* several completions from it and checking which of them reach the correct answer. Its *soft* label, the fraction of rollouts that succeed, is a Monte Carlo estimate of the value $v_\pi(S_t)$ of the partial solution under the rollout policy. Its *hard* label (1 if any rollout succeeds) is an optimistic, pass@$k$-like variant. A PRM trained on soft labels is a learned value function, and the "progress" a step makes, the change in that value, is an advantage. Setlur et al. (2025) developed this view into process *advantage* verifiers. The circle closes back to actor-critic methods ([Chapter 10](10-policy-gradients.md)).
 
 **Using step rewards in GRPO.** DeepSeekMath's process-supervision variant gives step $j$ of response $i$ a reward $r_i^{(j)}$ and normalizes all step rewards in the group together: $\tilde r_i^{(j)}=(r_i^{(j)}-\mathrm{mean}(\mathbf R))/\mathrm{std}(\mathbf R)$, where $\mathbf R$ is the set of all step rewards of all $G$ responses. The advantage of a token is the sum of the normalized rewards of the steps that end at or after it:
 
@@ -1036,10 +1067,10 @@ All scripts live in [`code/ch18_rl_for_language_models/`](../code/ch18_rl_for_la
 
 | Script | Command | Quick | Full | Headline result |
 |---|---|---|---|---|
-| [`kl_bandit.py`](../code/ch18_rl_for_language_models/kl_bandit.py) | `python code/ch18_rl_for_language_models/kl_bandit.py` | 2 s | 12 s | closed form matches SLSQP to $3\times10^{-7}$; population DPO = $\pi^\ast_\beta$ to $2\times10^{-8}$; deterministic preferences: DPO → point mass for every $\beta$; best-of-$n$ KL formula is an upper bound |
-| [`rlhf_toy.py`](../code/ch18_rl_for_language_models/rlhf_toy.py) | `python code/ch18_rl_for_language_models/rlhf_toy.py` | 11 s | 5.1 min | true reward peaks at $\beta=0.1$ (2.96); at $\beta=0.01$ RM score ↑, true reward ↓ to 1.83 with 100% repetition; DPO's KL grows with epochs; best-of-512 reaches 3.10 |
-| [`grpo_rlvr.py`](../code/ch18_rl_for_language_models/grpo_rlvr.py) | `python code/ch18_rl_for_language_models/grpo_rlvr.py` | 10 s | 5.1 min | base 0.36 → GRPO 0.70, GRPO+PRM 0.77; base maj@$k$ falls with $k$ (systematic error), base pass@64 = 0.998 |
-| [`exercise_solutions.py`](../code/ch18_rl_for_language_models/exercise_solutions.py) | `python code/ch18_rl_for_language_models/exercise_solutions.py` | 13 s | 2.2 min | numbers quoted in the exercise solutions |
+| [`kl_bandit.py`](../code/ch18_rl_for_language_models/kl_bandit.py) | `python code/ch18_rl_for_language_models/kl_bandit.py` | 2 s | 15 s | closed form matches SLSQP to $3\times10^{-7}$; population DPO = $\pi^\ast_\beta$ to $2\times10^{-8}$; deterministic preferences: DPO → point mass for every $\beta$; best-of-$n$ KL formula is an upper bound |
+| [`rlhf_toy.py`](../code/ch18_rl_for_language_models/rlhf_toy.py) | `python code/ch18_rl_for_language_models/rlhf_toy.py` (add `--seed 1`, `--seed 2` for the replications, which write no figures) | 17 s | 5.2 min per seed | final true reward peaks at $\beta\approx0.03$–$0.1$ (2.96 at $\beta=0.1$ in seed 0); at $\beta=0.01$ RM score ↑, true reward ↓ with 100% repetition in all 3 seeds; DPO's KL grows with epochs; best-of-512 reaches 3.10; exact best-of-$n$ KL ≈ the bound here |
+| [`grpo_rlvr.py`](../code/ch18_rl_for_language_models/grpo_rlvr.py) | `python code/ch18_rl_for_language_models/grpo_rlvr.py` | 10 s | 6.5 min | base 0.36 → GRPO 0.70, GRPO+PRM 0.77; GRPO vs Dr. GRPO a tie once both drop the KL term (0.707 vs 0.695); base maj@$k$ falls with $k$ (systematic error), base pass@64 = 0.998 |
+| [`exercise_solutions.py`](../code/ch18_rl_for_language_models/exercise_solutions.py) | `python code/ch18_rl_for_language_models/exercise_solutions.py` | 13 s | 2.6 min | numbers quoted in the exercise solutions |
 
 [`toy_lm.py`](../code/ch18_rl_for_language_models/toy_lm.py) holds the shared model code. The policy is a GRU whose input at each step is the previous token's embedding concatenated with an embedding of the prompt. Sampling carries the hidden state forward, and every sequence quantity is a masked sum over the real decisions (tokens up to and including the first EOS). The exact per-token KL used for all reported KLs is (18.5):
 
@@ -1067,20 +1098,22 @@ hw, hl = lw - ref_w[idx], ll - ref_l[idx]           # log-ratios h = log pi_thet
 loss = F.softplus(-beta * (hw - hl)).mean()         # -log sigma(beta (h_w - h_l)), eq. (18.19)
 ```
 
-In [`grpo_rlvr.py`](../code/ch18_rl_for_language_models/grpo_rlvr.py), all six update rules share one loop. The methods differ only in the advantage and in how token losses are aggregated:
+In [`grpo_rlvr.py`](../code/ch18_rl_for_language_models/grpo_rlvr.py), all update rules share one loop. The methods differ only in the advantage, in how token losses are aggregated, in the clip and in the KL coefficient:
 
 ```python
 METHODS = {
     "REINFORCE": dict(adv="none", norm="seq_sum",  clip=None,        beta=0.0,  dyn=False),
     "RLOO":      dict(adv="rloo", norm="seq_sum",  clip=None,        beta=0.0,  dyn=False),
     "GRPO":      dict(adv="grpo", norm="seq_mean", clip=(0.2, 0.2),  beta=0.04, dyn=False),
-    "Dr. GRPO":  dict(adv="mean", norm="const",    clip=(0.2, 0.2),  beta=0.04, dyn=False),
+    "GRPO, beta=0": dict(adv="grpo", norm="seq_mean", clip=(0.2, 0.2), beta=0.0, dyn=False),
+    "Dr. GRPO":  dict(adv="mean", norm="const",    clip=(0.2, 0.2),  beta=0.0,  dyn=False),
+    "Dr. GRPO, beta=0.04": dict(adv="mean", norm="const", clip=(0.2, 0.2), beta=0.04, dyn=False),
     "DAPO-lite": dict(adv="grpo", norm="token",    clip=(0.2, 0.28), beta=0.0,  dyn=True),
     "GRPO+PRM":  dict(adv="process", norm="seq_mean", clip=(0.2, 0.2), beta=0.04, dyn=False),
 }
 ```
 
-**Things to try.** Change `LAMBDA_REP` in `rlhf_toy.py` to 0, so that repetition is no longer penalized, and watch over-optimization disappear. Raise `STOP_PROB` so that demonstrations get shorter and reward-model coverage of long responses shrinks. In `grpo_rlvr.py`, set `P_WRAP = 0` (random errors only) and see majority voting start to work for the base model. Change the group size `G` and watch the fraction of no-signal groups.
+**Things to try** (we have not run these; predict the outcome first, then check). Set `LAMBDA_REP` in `rlhf_toy.py` to 0, so that repetition is no longer penalized by the true reward. Does the peak-and-fall of Section 8.4 disappear, or only weaken? (The reward model still over-rates repetition, and repeating a word still adds nothing to the true reward.) Raise `STOP_PROB` so that demonstrations get shorter and reward-model coverage of long responses shrinks. In `grpo_rlvr.py`, set `P_WRAP = 0` (random errors only) and check whether maj@$k$ for the base model now rises with $k$. Change the group size `G` and compare the fraction of no-signal groups with Exercise 7.
 
 ---
 
@@ -1088,7 +1121,7 @@ METHODS = {
 
 1. **Confusing the two KLs.** PPO-RLHF has a trust region toward the *previous iterate* (the clip) and a penalty toward the *fixed reference* (the KL term). The first controls step size. The second changes the objective, and it is the one $\beta$ refers to.
 2. **Trusting a rising reward-model score.** The proxy improves monotonically while the true reward peaks and falls (Section 8.4). Always track an independent estimate of quality (held-out human or judge evaluations, a gold model in research settings) against KL, and read samples.
-3. **Believing held-out reward-model accuracy measures robustness.** Our RM-8k was no more accurate than RM-2k on held-out pairs, yet led to a much better policy at $\beta=0.1$; both were blind to repetition (Section 2.5). Accuracy on the reference distribution says nothing about the regions the optimizer will visit.
+3. **Believing held-out reward-model accuracy measures robustness.** Our RM-8k was no more accurate than RM-2k on held-out pairs, yet led to a much better policy at $\beta=0.1$ in two of three seeds (and a slightly worse one in the third); both were blind to repetition (Sections 2.5 and 8.4). Accuracy on the reference distribution says nothing about the regions the optimizer will visit.
 4. **Off-by-one errors in token log-probabilities.** The logits at position $t$ predict token $t+1$. Shifting wrongly gives plausible-looking but meaningless ratios and KLs. Check that the sequence log-probability under teacher forcing matches the sum of the log-probabilities recorded during sampling.
 5. **Not masking what the policy did not choose.** Prompt tokens, padding after EOS and, in agentic RL, tool outputs must be excluded from the policy loss and from KL sums.
 6. **Mismatched sampling and training distributions.** If responses are sampled at temperature 0.7 but log-probabilities are computed at temperature 1, the importance ratios are wrong from the first step. The same happens silently when a fast inference engine and the training code compute slightly different log-probabilities. Compare them.
@@ -1155,15 +1188,15 @@ METHODS = {
 
 Numerical answers come from [`exercise_solutions.py`](../code/ch18_rl_for_language_models/exercise_solutions.py) unless stated otherwise.
 
-**Exercise 1 ★ (The sequence KL is a sum of token KLs).** Prove both lines of (18.5) for an autoregressive policy with responses of a fixed length $L$. Then explain why summing exact next-token KLs along sampled responses gives a lower-variance estimate than summing sampled log-ratios.
+**Exercise 1 ★ (The sequence KL is a sum of token KLs).** Prove both lines of (18.5) for an autoregressive policy with responses of a fixed length $L$. Then compare two estimators of the sequence KL from one sampled response: the sum of sampled log-ratios, and the sum of exact next-token KLs along it. Show that replacing each term by its conditional expectation given $S_t$ removes that term's conditional variance. Is the variance of the whole sum guaranteed to fall?
 
 <details><summary>Solution</summary>
 
 By (18.1), $\log\frac{\pi(y\mid x)}{\pi_{\mathrm{ref}}(y\mid x)}=\sum_{t=1}^{L}\log\frac{\pi(y_t\mid S_t)}{\pi_{\mathrm{ref}}(y_t\mid S_t)}$. Taking $\mathbb E_{y\sim\pi}$ of both sides gives the first line, since the left side's expectation is the definition of the KL. For the second line, apply the tower property to each term: $\mathbb E_{y\sim\pi}\big[\log\frac{\pi(y_t\mid S_t)}{\pi_{\mathrm{ref}}(y_t\mid S_t)}\big]=\mathbb E_{S_t}\Big[\mathbb E_{y_t\sim\pi(\cdot\mid S_t)}\big[\log\frac{\pi(y_t\mid S_t)}{\pi_{\mathrm{ref}}(y_t\mid S_t)}\big]\Big]=\mathbb E_{S_t}\big[D_{\mathrm{KL}}(\pi(\cdot\mid S_t)\Vert\pi_{\mathrm{ref}}(\cdot\mid S_t))\big]$, where $S_t$ is distributed as under $\pi$. Summing over $t$ gives the second line. With EOS, define every term after the end to be 0; the event "not yet ended" is a function of $S_t$, so the same argument applies.
 
-The second estimator replaces each sampled log-ratio by its conditional expectation given $S_t$. By the law of total variance (Rao–Blackwellization), this cannot increase the variance, and it removes the variance due to sampling $y_t$ entirely. It also cannot be negative, whereas a single sampled log-ratio often is.
+Write $\ell_t=\log\frac{\pi(y_t\mid S_t)}{\pi_{\mathrm{ref}}(y_t\mid S_t)}$ for the sampled log-ratio and $\mathrm{KL}_t(S_t)=\mathbb E[\ell_t\mid S_t]$ for the exact next-token KL. *Term by term*, the law of total variance gives $\mathrm{Var}(\ell_t)=\mathbb E[\mathrm{Var}(\ell_t\mid S_t)]+\mathrm{Var}(\mathrm{KL}_t(S_t))\ge\mathrm{Var}(\mathrm{KL}_t(S_t))$, so each replaced term is no noisier than the original, and it is never negative. For the *sum* the guarantee fails, because each term is conditioned on a different $S_t$: a later $\mathrm{KL}_s(S_s)$, $s>t$, depends on the sampled $y_t$ and can be anti-correlated with $\ell_t-\mathrm{KL}_t$, so removing the noise of $\ell_t$ can remove a cancellation. A counterexample with two steps: at step 1, $\pi=(0.5,0.5)$ and $\pi_{\mathrm{ref}}=(0.25,0.75)$, so $\ell_1\in\{\log2,\log\frac23\}$ and $\mathrm{KL}_1=0.144$. At step 2 the policy emits one token deterministically, chosen so that its reference probability is $e^{-(1-\ell_1)}$ (0.736 or 0.245). Then $\ell_2=\mathrm{KL}_2=1-\ell_1$. The sampled sum $\ell_1+\ell_2$ is identically 1, with variance 0, while the exact-KL sum $0.144+1-\ell_1$ takes the values 0.451 and 1.549 with variance 0.302. Both have mean 1, the true KL. In practice the exact sum is usually much less noisy, and its non-negativity is what makes it a reliable diagnostic.
 
-On a random 3-token tree with a 3-word vocabulary, the script computes the sequence KL by enumerating all 27 responses (1.278089), and the expected sum of token KLs gives the same 1.278089.
+On a random 3-token tree with a 3-word vocabulary, the script computes the sequence KL by enumerating all 27 responses (1.278089), and the expected sum of token KLs gives the same 1.278089. On this tree the variance of a single response's estimate is 2.764 for the sum of sampled log-ratios and 0.098 for the sum of exact KLs, and the sampled estimate is negative with probability 0.171. The script also reproduces the counterexample (variances 0.000 and 0.302).
 
 </details>
 
@@ -1263,9 +1296,11 @@ All $G$ independent rewards are 1 with probability $p^G$ and all are 0 with prob
 
 <details><summary>Solution</summary>
 
-(a) Section 9.2: $\nabla\hat D=(1-q/p)\nabla\log p$, and $\sum_a p(1-q/p)\nabla\log p=\sum_a(p-q)\nabla\log p=-\sum_aq\nabla\log p=\nabla\sum_aq\log\frac qp=\nabla D_{\mathrm{KL}}(q\Vert p)$.
+Write $\pi_a=\pi_{\boldsymbol\theta}(a\mid S)$ and $\bar\pi_a=\pi_{\mathrm{ref}}(a\mid S)$, as in Section 9.2.
 
-(b) $\nabla D_{\mathrm{KL}}(p\Vert q)=\nabla\sum_ap\log\frac pq=\sum_a\nabla p\,\log\frac pq+\sum_a p\,\nabla\log p=\mathbb E_{a\sim p}\big[\log\frac pq\,\nabla\log p\big]$, since the second sum is zero. This is exactly the score-function term produced by the KL-shaped reward in (18.13), with the sign giving descent on the KL.
+(a) $\nabla\hat D=(1-\bar\pi_a/\pi_a)\nabla\log\pi_a$, and $\sum_a \pi_a(1-\bar\pi_a/\pi_a)\nabla\log\pi_a=\sum_a(\pi_a-\bar\pi_a)\nabla\log\pi_a=-\sum_a\bar\pi_a\nabla\log\pi_a=\nabla\sum_a\bar\pi_a\log\frac{\bar\pi_a}{\pi_a}=\nabla D_{\mathrm{KL}}(\pi_{\mathrm{ref}}\Vert\pi_{\boldsymbol\theta})$.
+
+(b) $\nabla D_{\mathrm{KL}}(\pi_{\boldsymbol\theta}\Vert\pi_{\mathrm{ref}})=\nabla\sum_a\pi_a\log\frac{\pi_a}{\bar\pi_a}=\sum_a\nabla \pi_a\,\log\frac{\pi_a}{\bar\pi_a}+\sum_a \pi_a\,\nabla\log\pi_a=\mathbb E_{a\sim\pi_{\boldsymbol\theta}}\big[\log\frac{\pi_a}{\bar\pi_a}\,\nabla\log\pi_a\big]$, since the second sum is zero. This is exactly the score-function term produced by the KL-shaped reward in (18.13), with the sign giving descent on the KL.
 
 For a softmax over 6 actions with random logits and a random $\pi_{\mathrm{ref}}$, the script computes $\mathbb E[\nabla\hat D]=(0.3697,-0.2497,-0.0582,0.1246,-0.0391,-0.1473)$, which equals $\nabla D_{\mathrm{KL}}(\pi_{\mathrm{ref}}\Vert\pi_{\boldsymbol\theta})$ to all printed digits and differs from $\nabla D_{\mathrm{KL}}(\pi_{\boldsymbol\theta}\Vert\pi_{\mathrm{ref}})=(0.2633,-0.1727,-0.0309,0.0624,-0.0507,-0.0713)$. Both gradients vanish at $\pi_{\boldsymbol\theta}=\pi_{\mathrm{ref}}$ and both pull toward it, but they weight the actions differently.
 
@@ -1306,7 +1341,7 @@ The mask sums count tokens including EOS. With $\beta=2$, $\gamma=0.5$ and 20 ep
 | DPO, $\beta=0.1$ | 3.049 | 1.44 | 5.76 | 9% | 5.58 | $-11.13$ | $-16.19$ |
 | SimPO, $\beta=2$, $\gamma=0.5$ | 2.895 | 1.42 | 5.55 | 20% | 5.84 | $-4.31$ | $-5.48$ |
 
-($\pi_{\mathrm{ref}}$ has mean length 3.08 words. The log-probability changes are measured on held-out pairs.)
+($\pi_{\mathrm{ref}}$ has mean length 3.08 words. The log-probability changes are measured on held-out pairs. Like Exercise 11, this exercise trains its own SFT model, reward model and preference set with the same settings as the main run, so its DPO numbers differ from those of Section 5.4: true reward 3.05 here against 2.90 there, and $-11.1$ against $-11.7$ nats for the chosen responses. The difference is a direct measure of run-to-run variation in this toy.)
 
 The two losses ended up in similar places. SimPO lowered the chosen responses' log-probability much less (by 4.3 instead of 11.1 nats), since it optimizes average per-token log-probabilities against a fixed margin instead of an unbounded log-ratio margin. It drifted just as far from $\pi_{\mathrm{ref}}$ even though it never looks at $\pi_{\mathrm{ref}}$, produced more repetitions, and earned a slightly lower true reward. Length normalization did not shorten responses here (5.84 words, against 5.58 for DPO). With one seed and one setting of $(\beta,\gamma)$, no ranking of the two should be read into this.
 
@@ -1323,9 +1358,18 @@ Results (a fresh SFT model and RM-1 trained on 2,000 reference pairs, as in Exer
 | round 1: PPO $\beta=0.01$ against RM-1 | 0.626 | 2.83 | 44.7 | 100% |
 | round 2: PPO $\beta=0.01$ against RM-2 (RM-1's pairs + 2,000 pairs from the round-1 policy) | 3.108 | 2.43 | 22.9 | 100% |
 
-The repeat probe for RM-2 (topic 0, best word repeated 1, 2, 3, 5, 9 times) reads $-0.73,-0.48,-0.29,-0.04,+0.23$. It is much flatter than RM-1's and starts lower, because RM-2 has now seen many labelled repetitive responses. For topic 1, however, it still rises steeply ($+0.23$ to $+3.21$).
+The repeat probe (best word repeated 1, 2, 3, 5, 9 times; over that range the true reward falls by $8\times0.6=4.8$ on every topic, from $+1.20$ to $-3.60$ for topic 0) gives a mixed picture for RM-1 and RM-2, in standardized units:
 
-One round of on-policy labels raised the true reward at the same aggressive $\beta$ from 0.63 to 3.11, comparable to the best results of the main run. It did not remove repetition: every response still repeats some word, at a smaller cost than before, and the KL is still 22.9 nats. The new reward model has closed part of its blind spot, and the policy has found the edge of the part that remains. This is why iterated RLHF is run for several rounds, and why a moderate $\beta$ remains useful even with a better reward model. It is also the reason RLHF is best thought of as an interactive process between policy and reward model, not a one-shot pipeline.
+| topic | RM-1 | RM-2 |
+|---|---|---|
+| 0 | $+0.00,\,+0.66,\,+1.12,\,+1.63,\,+1.96$ | $-0.73,\,-0.48,\,-0.29,\,-0.04,\,+0.23$ |
+| 1 | $+0.53,\,+1.50,\,+2.06,\,+2.58,\,+2.81$ | $+0.23,\,+1.17,\,+1.92,\,+2.77,\,+3.21$ |
+| 2 | $+0.93,\,+1.42,\,+1.63,\,+1.75,\,+1.69$ | $+1.32,\,+1.85,\,+2.15,\,+2.39,\,+2.43$ |
+| 3 | $+0.24,\,+1.07,\,+1.61,\,+2.21,\,+2.66$ | $+0.42,\,+1.17,\,+1.61,\,+2.01,\,+2.11$ |
+
+For topic 0, RM-2's curve starts lower and is much flatter, and for topic 3 it flattens at the top. For topics 1 and 2 it is *steeper* than RM-1's. Both reward models still say "more repetition is better" on every topic. The new pairs taught RM-2 about the repetitive responses the round-1 policy actually produced, which need not be the ones this probe tests (a possible explanation that we did not check further).
+
+One round of on-policy labels raised the true reward at the same aggressive $\beta$ from 0.63 to 3.11, comparable to the best results of the main run. It did not remove repetition: every response still repeats some word, at a smaller cost than before, and the KL is still 22.9 nats. The new reward model has closed part of its blind spot, and the policy has found the edge of the part that remains. Note that RM-2 was also trained on twice as many pairs as RM-1. Section 8.4 has the control for "more data, but from $\pi_{\mathrm{ref}}$": RM-8k, trained on four times as many reference pairs, still let PPO at $\beta=0.01$ collapse onto repetition. What matters is *where* the extra labels come from. This is why iterated RLHF is run for several rounds, and why a moderate $\beta$ remains useful even with a better reward model. It is also the reason RLHF is best thought of as an interactive process between policy and reward model, not a one-shot pipeline.
 
 </details>
 
@@ -1339,7 +1383,7 @@ One round of on-policy labels raised the true reward at the same aggressive $\be
 * **Rafailov et al. (2023)** and **Azar et al. (2024).** Read together: the first derives DPO from the closed form, and the second places it in a general family and explains when it fails.
 * **Gao, Schulman and Hilton (2023), "Scaling laws for reward model overoptimization."** The cleanest quantitative study of Goodhart's law in RLHF, using a synthetic gold reward model as in our toy.
 * **Casper et al. (2023), "Open problems and fundamental limitations of reinforcement learning from human feedback."** A survey of what RLHF cannot do, from human feedback quality to reward misspecification.
-* **Shao et al. (2024), DeepSeekMath.** Section 4 introduces GRPO, and its discussion of a "unified paradigm" writes SFT, rejection-sampling fine-tuning, DPO, PPO and GRPO as different choices of data source and gradient coefficient. That is a useful way to compare all the methods in this chapter.
+* **Shao et al. (2024), DeepSeekMath.** Section 4 introduces GRPO, and Section 5.2 ("Insights of Reinforcement Learning") writes SFT, rejection-sampling fine-tuning, DPO, PPO and GRPO as different choices of data source and gradient coefficient. That is a useful way to compare all the methods in this chapter.
 * **DeepSeek-AI (2025), DeepSeek-R1.** The most detailed public account of training a reasoning model with RLVR, including the unsuccessful attempts.
 * **Liu et al. (2025), "Understanding R1-Zero-like training"** and **Yu et al. (2025), DAPO.** Short, concrete papers on what GRPO's normalizations do and how to fix them for long chain-of-thought training.
 * **Lightman et al. (2024), "Let's verify step by step,"** and **Snell et al. (2025)** on process supervision and test-time compute.

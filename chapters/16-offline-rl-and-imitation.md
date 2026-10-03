@@ -28,10 +28,10 @@ The two halves share one enemy: **distribution shift**. A learned policy visits 
 
 | Script | What it shows | Full run |
 |---|---|---|
-| [`dagger_vs_bc.py`](../code/ch16_offline_rl_and_imitation/dagger_vs_bc.py) | Compounding errors on an unstable "tightrope": BC's excess cost grows much faster with the horizon $T$ than DAgger's, and DAgger needs about ten times fewer expert labels | ~2 min |
+| [`dagger_vs_bc.py`](../code/ch16_offline_rl_and_imitation/dagger_vs_bc.py) | Compounding errors on an unstable "tightrope": BC's excess cost grows much faster with the horizon $T$ than DAgger's, and DAgger needs about ten times fewer expert labels | ~2–2.5 min |
 | [`irl_gridworld.py`](../code/ch16_offline_rl_and_imitation/irl_gridworld.py) | Apprenticeship learning (projection method) and MaxEnt IRL on a terrain gridworld; the recovered reward transfers to a changed world where BC fails | ~20 s |
-| [`offline_cartpole.py`](../code/ch16_offline_rl_and_imitation/offline_cartpole.py) | Expert, medium and random datasets on CartPole-v1; BC, naive offline DQN (Q-values blow up past $10^5$), discrete BCQ, CQL and IQL | ~5 min |
-| [`offline_sensitivity.py`](../code/ch16_offline_rl_and_imitation/offline_sensitivity.py) | CQL's $\alpha$ and IQL's $(\tau, \beta)$ swept on two datasets: the safe range of $\alpha$ shifts with the data ($\alpha = 1$ is the only value that works on both), no IQL setting is best on both, and IQL's upper expectile overestimates even on expert data | ~7 min |
+| [`offline_cartpole.py`](../code/ch16_offline_rl_and_imitation/offline_cartpole.py) | Expert, medium and random datasets on CartPole-v1; BC, naive offline DQN (Q-values blow up past $10^5$), discrete BCQ, CQL and IQL | ~5–6 min |
+| [`offline_sensitivity.py`](../code/ch16_offline_rl_and_imitation/offline_sensitivity.py) | CQL's $\alpha$ and IQL's $(\tau, \beta)$ swept on two datasets: the safe settings shift with the data, and IQL's upper expectile inflates values even on expert data | ~7 min |
 | [`cql_tabular.py`](../code/ch16_offline_rl_and_imitation/cql_tabular.py) | Numerical check of the CQL lower-bound theorems in a table, exact and with finite data | ~5 s |
 | [`sequence_vs_dp.py`](../code/ch16_offline_rl_and_imitation/sequence_vs_dp.py) | Return-conditioned supervised learning (the idea behind Decision Transformer) vs dynamic programming: stitching and luck | <1 s |
 | [`ope_tabular.py`](../code/ch16_offline_rl_and_imitation/ope_tabular.py) | IS, WIS, PDIS, WPDIS, FQE, DR and WDR against the true value of a target policy; data size, horizon and policy mismatch | ~1 min |
@@ -948,24 +948,23 @@ act with pi(s) = argmax_a pi_theta(a | s)
 
 We used the IQL paper's locomotion defaults, $\tau = 0.7$ and $\beta = 3$. IQL solves the expert data (500 for every seed) and learns a good policy from the random data ($422 \pm 56$; 435 averaged over the last three evaluations). Its value estimates there (41) sit between the behaviour policy's value (about 13) and the optimal one (about 100), as an expectile between mean and max should. On the **medium** data, however, IQL collapses to 10.2, as badly as naive DQN, although its values never blow up. The sensitivity sweep (3 seeds per setting) adds diagnostics:
 
-| $(\tau, \beta)$ | medium: return | agreement with controller | mean $A$, controller's actions | mean $A$, other actions | random: return |
-|---|---|---|---|---|---|
-| (0.5, 1) | 174.9 | 0.99 | +0.011 | −0.009 | 417.4 |
-| (0.5, 10) | **9.9** | 0.60 | +0.011 | −0.009 | 443.4 |
-| (0.7, 1) | 141.7 | 0.94 | −0.214 | +0.175 | 409.5 |
-| (0.7, 3) | **9.9** | 0.62 | −0.214 | +0.175 | 448.2 |
-| (0.9, 1) | **9.6** | 0.37 | −14.5 | +0.069 | 491.1 |
-| (0.9, 10) | **9.6** | 0.37 | −14.5 | +0.069 | 492.7 |
+| $(\tau, \beta)$ | medium: return | agreement with controller | preference for the other action: mean (sd) | medium: mean $\max Q$ | random: return | random: mean $\max Q$ |
+|---|---|---|---|---|---|---|
+| (0.5, 1) | 174.9 | 0.99 | −0.03 (0.77) | 54.0 | 417.4 | 15.1 |
+| (0.5, 10) | **9.9** | 0.60 | −0.03 (0.77) | 54.0 | 443.4 | 15.1 |
+| (0.7, 1) | 141.7 | 0.94 | +0.39 (1.23) | 60.7 | 409.5 | 41.5 |
+| (0.7, 3) | **9.9** | 0.62 | +0.39 (1.23) | 60.7 | 448.2 | 41.5 |
+| (0.9, 1) | **9.6** | 0.37 | +14.9 (40.3) | **501.0** | 491.1 | **161.6** |
 
-"Agreement" is the fraction of dataset states where the learned policy picks the medium controller's action. "Mean $A$" is the estimated advantage of logged actions that agree, or disagree, with the controller.
+"Agreement" is the fraction of the medium dataset's states where the learned policy picks the medium controller's action. The "preference" is the critic's $Q(s, \text{other}) - Q(s, \text{controller's action})$ over those states: its mean and, in brackets, its standard deviation across states. $\beta$ affects only the policy, so rows with the same $\tau$ share their critic.
 
-Three separate things go wrong, and all three come from the medium data's *narrow state coverage* with a sprinkling of random actions.
+Three things go wrong, all rooted in the medium data's *narrow state coverage* with a sprinkling of random actions.
 
-1. **Noise amplified by $\beta$.** At $\tau = 0.5$ the critic evaluates the behaviour policy, and the average advantages are tiny ($\pm 0.01$): a single random deviation barely matters to CartPole. Per sample, though, the estimates are noisy, and with $\beta = 10$ the weights $e^{\beta A}$ are dominated by that noise. The policy ends up imitating the random actions in 40% of states and falls in 10 steps. With $\beta = 1$ it stays a near-copy of the controller (175).
-2. **One deviation is not a policy.** At $\tau = 0.7$ the critic says the *other* action is better on average ($+0.175$ vs $-0.214$). Plausibly, a single correction does help against the controller's bias. Advantage weighting then switches action in 38% of states. But $A$ measures one deviation followed by the *behaviour* policy, not a policy that deviates everywhere. Doing so leads to states the data never contain, where the estimates mean nothing. That is compounding error again, now inside offline RL.
-3. **Expectiles chasing a rare action.** At $\tau = 0.9$, $V$ tracks the upper tail of $Q$ over the logged actions, and the rare alternative action is in that tail. The values diverge to 501, five times the possible maximum. A support constraint does not help when the support includes an action whose value is barely constrained by data.
+1. **Noise amplified by $\beta$.** At $\tau = 0.5$ the critic evaluates the behaviour policy. On average it finds a deviation slightly harmful ($-0.03$), but per state the preference has a standard deviation of 0.77 and is positive in half the states: the signal is buried in noise. With $\beta = 10$ the weights $e^{\beta A}$ are almost pure noise, the policy imitates the random actions in 40% of states, and it falls in 10 steps. With $\beta = 1$ it stays a near-copy of the controller (175).
+2. **Advantages that are right on average are not right everywhere.** At $\tau = 0.7$ the critic no longer evaluates $b$: the expectile backup shifts the comparison by about $+0.4$ in favour of the rare action (positive in 55% of states), and advantage weighting switches action in 38% of states. If these were the exact $A^b$ at every state the new policy visits, the argument of Exercise 16.10 would guarantee no loss, even for a policy that deviates everywhere. They are not exact. They are expectile advantages, fitted only on the controller's narrow state distribution, and a policy that deviates in 38% of states soon reaches states the data never contain, where the estimates mean nothing. Errors compound along the new policy's own trajectories: the covariate shift of Section 2, now inside offline RL.
+3. **Expectiles chasing noise.** At $\tau = 0.9$, $V$ tracks the upper tail of $\bar Q$ over *nearby* logged samples. With continuous states that tail contains approximation noise as well as the other action (Section 9.2), and the optimism compounds through the bootstrap $Q \leftarrow r + \gamma V(s')$. The values exceed the possible maximum of 100 on the random data (162), where both actions are logged equally often, and reach 501 on the medium data. Even on the expert data, which contain exactly one action per state, so that a tabular expectile would change nothing, $\tau = 0.9$ inflates the values: after 8,000 steps they are 99.5 and still rising, against 79.8 for $\tau = 0.5$ with the same seeds. Both are still climbing towards the true value of about 100 (Section 8.6), and the extra 20 can only come from the expectile.
 
-On the random data the *same* settings work, and the most aggressive ones work best ($\tau = 0.9$: 491–493). With broad coverage, the advantages carry signal rather than noise. No single $(\tau, \beta)$ is right for both datasets, and the same is true of CQL's $\alpha$. This is the central practical difficulty of offline RL.
+On the random data the same settings work, and the most aggressive one works best ($\tau = 0.9$: 491) despite its inflated values: with broad coverage the advantages carry signal, and the ranking of the two actions survives the bias. No $(\tau, \beta)$ is best on both datasets. The best on medium data, $(0.5, 1)$, merely copies the controller (175) and is fourth of five on random data (417); the best on random data, $\tau = 0.9$, collapses on medium data. CQL's $\alpha$ only just escapes (Section 8.6): one value out of four works on both. Choosing the conservatism of an offline method without online evaluation is the central practical difficulty of offline RL.
 
 ---
 
@@ -1278,20 +1277,20 @@ pi_loss = -(weight * logp).mean(1).sum()                      # advantage-weight
 
 **Seeds as an ensemble.** On one CPU thread, a small network's training step is dominated by per-call overhead, so five independent sets of weights trained together cost far less than five separate runs. `offline_lib.EnsembleMLP` stores weights of shape `[E, in, out]` and uses `torch.baddbmm`. Each member draws its own minibatches and has its own initialisation, and Adam acts elementwise. Training on the *sum* of the members' losses is therefore exactly $E$ independent runs.
 
-**Exact evaluation in tabular demos.** `dagger_vs_bc.py`, `irl_gridworld.py`, `cql_tabular.py` and `ope_tabular.py` compute expected costs, returns and values by propagating distributions or solving linear systems, not by sampling. The randomness that remains is in the training data, which we average over hundreds of draws. The quantities plotted are therefore expectations, not noisy estimates of them.
+**Exact evaluation in tabular demos.** `dagger_vs_bc.py`, `irl_gridworld.py`, `cql_tabular.py` and `ope_tabular.py` compute expected costs, returns and values by propagating distributions or solving linear systems, not by sampling. The only randomness left is in the training data, averaged over hundreds of draws.
 
-| Script | Quick run | Full run | Headline result |
+| Script | Results in | Quick run | Full run |
 |---|---|---|---|
-| `dagger_vs_bc.py` | 2 s | 112 s | log–log slope of excess cost 1.44–1.54 (BC) vs 1.17–1.32 (DAgger); excess at $T = 1000$ with 1,000 labels: 221 (BC) vs 63 (DAgger) |
-| `irl_gridworld.py` | 1 s | 17 s | transfer world: MaxEnt IRL 55.9, BC −42.2, soft expert 55.9 |
-| `offline_cartpole.py` | 12 s | 300 s | naive DQN's Q reaches $1.5\times10^5$ on expert data; CQL 500 / 167 / 497 on expert / medium / random |
-| `offline_sensitivity.py` | 5 s | 390 s | CQL $\alpha = 10$ drops random-data return from 500 to 200; IQL collapses on medium data for $\beta \ge 3$ or $\tau = 0.9$ |
-| `cql_tabular.py` | <1 s | 3 s | closed form matches theory to $10^{-14}$; $\alpha \ge 0.03$ makes $\hat V \le V^\pi$ in at least 91% of datasets |
-| `sequence_vs_dp.py` | <1 s | <1 s | stitching: DP 10, RCSL at most 3; luck: RCSL conditioned on 10 gambles (EV 3 < 5) |
-| `ope_tabular.py` | <1 s | 58 s | $n=100$: IS 5.52, WPDIS 0.39, FQE 0.19, DR 0.63; misspecified FQE floor 0.41, DR-agg 0.12 at $n = 5000$ |
-| `exercise_solutions.py` | 1 s | 10 s | cliff closed form, expectiles, AWR closed form, tabular GAIL (JS 0.031), OPE-based policy selection |
+| `dagger_vs_bc.py` | Section 2.6 | 2–3 s | 112–141 s |
+| `irl_gridworld.py` | Section 4.4 | 1 s | 17–23 s |
+| `offline_cartpole.py` | Sections 6.5, 7.3, 8.6, 9.4 | 12–15 s | 300–372 s |
+| `offline_sensitivity.py` | Sections 8.6, 9.4 | 5–7 s | 415 s |
+| `cql_tabular.py` | Section 8.5 | <1 s | 3–4 s |
+| `sequence_vs_dp.py` | Section 11.2 | <1 s | <1 s |
+| `ope_tabular.py` | Section 12.6 | <1 s | 58–61 s |
+| `exercise_solutions.py` | Exercises 16.2, 16.9, 16.10, 16.13, 16.14 | 1 s | 10–11 s |
 
-(Wall-clock times on a shared machine, one thread per script.)
+(Wall-clock times on a shared 4-CPU machine, one thread per script; the ranges span runs at different machine loads.)
 
 ---
 
@@ -1299,7 +1298,7 @@ pi_loss = -(weight * logp).mean(1).sum()                      # advantage-weight
 
 * **"My BC policy has 99% validation accuracy, so it will work."** Validation states come from the expert's distribution. What matters is the error on the learner's own states (Theorem 16.1 vs Eq. 16.7). Evaluate imitation policies by rolling them out.
 * **Running an off-policy algorithm on a fixed dataset and calling it offline RL.** DQN, DDPG and SAC rely on new data to correct overestimates. Offline they can diverge spectacularly ($10^5$ instead of 100 in Figure 16.5). Always plot Q estimates against an upper bound such as $R_{\max}/(1-\gamma)$, or against Monte Carlo returns of the data.
-* **Assuming that both actions appearing in the data means coverage is fine.** On the medium dataset the alternative action was logged 10% of the time, and DQN still diverged. What matters is coverage relative to what the *learned* policy will do, in the states it will visit. In-sample methods are not immune either: IQL's upper expectile ($\tau = 0.9$) overestimated on every dataset, most of all on the narrow medium data (501, against a possible maximum of 100).
+* **Assuming that both actions appearing in the data means coverage is fine.** On the medium dataset the alternative action was logged 10% of the time, and DQN still diverged. What matters is coverage relative to what the *learned* policy will do, in the states it will visit. In-sample methods are not immune either: IQL's upper expectile ($\tau = 0.9$) inflated its values on every dataset, even the expert data with one action per state, and most of all on the narrow medium data (501, against a possible maximum of 100).
 * **Constraining actions but not states.** Support constraints act per state. A policy that deviates a little in every state can still drive into states the data never contain (Section 9.4).
 * **Reporting offline RL results tuned on online returns.** If every hyperparameter was chosen by evaluating in the environment, the method was not offline. Say so, or select with OPE.
 * **Expecting conservative methods to be safe at any $\alpha$.** Too much conservatism makes CQL imitate the data, and on random data that throws away a 500-return policy (200 at $\alpha = 10$).
@@ -1351,7 +1350,7 @@ pi_loss = -(weight * logp).mean(1).sum()                      # advantage-weight
 | GAIL | $D^\ast = \frac{d^{\pi_E}}{d^{\pi_E}+d^\pi}$; objective $= 2D_{\mathrm{JS}}(d^{\pi_E}\Vert d^\pi) - \log 4$ (16.19–16.20) |
 | AIRL discriminator | $D = \frac{e^{f}}{e^{f}+\pi(a\mid s)}$, $f = g(s) + \gamma h(s') - h(s)$ (16.21) |
 | Discrete BCQ | $\pi(s) = \arg\max_{a:\ \hat b(a\mid s)/\max_{a'}\hat b(a'\mid s) > \tau_{\text{BCQ}}}Q(s,a)$ (16.23) |
-| TD3+BC | $\max_\pi \mathbb{E}_{\mathcal{D}}\big[\lambda Q(s,\pi(s)) - (\pi(s) - a)^2\big]$ (16.24) |
+| TD3+BC | $\max_\pi \mathbb{E}_{\mathcal{D}}\big[\lambda Q(s,\pi(s)) - \lVert\pi(s) - a\rVert^2\big]$ (16.24) |
 | CQL, tabular | $\hat Q_{k+1} = \hat{\mathcal{T}}^\pi\hat Q_k - \alpha\frac{\nu - \hat b}{\hat b}$ (16.28) |
 | CQL value gap | $\hat V = V^\pi - \alpha(\mathbf{I} - \gamma\mathbf{P}^\pi_{\mathcal S})^{-1}D_{\text{CQL}}$, $D_{\text{CQL}}(s) = \sum_a\frac{(\pi - \hat b)^2}{\hat b}$ (16.29–16.30) |
 | CQL(H), discrete | $\alpha\,\mathbb{E}_s\big[\log\sum_a e^{Q(s,a)} - \mathbb{E}_{a\sim\mathcal{D}}Q(s,a)\big] + \text{TD loss}$ (16.31) |

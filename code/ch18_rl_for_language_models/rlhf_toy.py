@@ -26,8 +26,10 @@ word (they are drawn without replacement), so the reward model sees few repeats 
 analogue of a reward model that never saw degenerate, repetitive text.
 
 Run from the repository root:
-    python code/ch18_rl_for_language_models/rlhf_toy.py            # full run with figures
+    python code/ch18_rl_for_language_models/rlhf_toy.py            # full run with figures (~5 min)
     python code/ch18_rl_for_language_models/rlhf_toy.py --quick    # smoke test, no figures
+    python code/ch18_rl_for_language_models/rlhf_toy.py --seed 1   # a replication: new hidden reward,
+                                                                    # new data, new training noise; no figures
 """
 from __future__ import annotations
 
@@ -193,8 +195,8 @@ def train_reward_model(task, prefs, val, epochs, g, batch=64):
 
 
 class NormalizedRM:
-    """r_phi standardised to mean 0, std 1 under pi_ref (InstructGPT normalised its RM so that
-    reference outputs score 0 on average).  Also holds a linear calibration a + b r_phi of the
+    """r_phi standardised to mean 0, std 1 under pi_ref (InstructGPT shifted its RM so that the
+    labellers' demonstrations score 0 on average; we use pi_ref samples).  Also holds a linear calibration a + b r_phi of the
     true reward fitted on pi_ref samples, used to measure the proxy-vs-gold gap (Section 8.4)."""
 
     def __init__(self, rm, task, ref, g, n=4096):
@@ -259,6 +261,10 @@ def run_ppo(task, ref, rmn, rm_raw, beta, iters, g, cfg, log_every=0, eval_every
         p.requires_grad_(True)
     critic = ScalarModel(VOCAB, N_PROMPTS)
     critic.load_state_dict(rm_raw.state_dict())  # InstructGPT: value model initialised from the RM
+    # Note: the critic starts from the *raw* reward model, while the rewards it must predict use
+    # the standardised score (r_phi - mu) / sd minus the KL penalty, so its initial values are off
+    # by that affine map, which the value loss must correct first.  Folding mu and sd into the
+    # scalar head (weight / sd, (bias - mu) / sd) would remove the mismatch from the start.
     for p in critic.parameters():
         p.requires_grad_(True)
     opt_pi = torch.optim.Adam(policy.parameters(), lr=cfg["lr"])
@@ -416,26 +422,60 @@ def run_dpo(task, ref, rmn, prefs, val, beta, epochs, g, cfg, log_every=0, eval_
 # ---------------------------------------------------------------------------------------
 @torch.no_grad()
 def best_of_n(task, ref, rmn, ns, g, n_prompts=512):
+    """Best-of-n from pi_ref reranked by the (normalised) reward model, for every n in ns.
+
+    KL.  log n - (n-1)/n (eq. 18.24) is only an upper bound on KL(pi_BoN || pi_ref): it is
+    loose when single responses carry real probability, as the short responses of this toy LM
+    do.  We also estimate the exact KL.  By eq. 18.23, for a response y with reference
+    probability p = pi_ref(y) and F-(y) = Pr_{y'~pi_ref}{r_phi(y') < r_phi(y)},
+        pi_BoN(y) / pi_ref(y) = ((F-(y) + p)^n - F-(y)^n) / p .
+    p is computed exactly from the model (teacher forcing); F-(y) is the empirical fraction of
+    all the reference samples drawn here for the same prompt that score strictly lower.  The KL
+    is the average log-ratio over the selected responses (which are samples from pi_BoN).  No
+    random numbers are drawn for this, so the rest of the run is unchanged.
+    """
     xs = g.integers(0, N_PROMPTS, n_prompts)
     nmax = max(ns)
-    c = task.cond(np.repeat(xs, nmax))
+    xs_rep = np.repeat(xs, nmax)
+    c = task.cond(xs_rep)
     y, m = ref.sample(c, T_MAX)
     z = rmn(c, y, m).numpy().reshape(n_prompts, nmax)
-    rt, _ = task.true_reward(np.repeat(xs, nmax), y, m)
+    rt, _ = task.true_reward(xs_rep, y, m)
     rt = rt.reshape(n_prompts, nmax)
+    # exact log pi_ref(y) of every sample (in chunks to bound memory)
+    logp = torch.cat([token_logprobs(ref, c[i:i + 16384], y[i:i + 16384], m[i:i + 16384]).sum(1)
+                      for i in range(0, len(xs_rep), 16384)]).numpy().astype(np.float64)
+    logp = logp.reshape(n_prompts, nmax)
+    # empirical F-(y): fraction of this prompt's reference samples with a strictly lower RM score
+    # (scores are compared with a small tolerance so that copies of the same response tie exactly)
+    F_minus = np.zeros((n_prompts, nmax))
+    for x in range(N_PROMPTS):
+        rows_x = xs == x
+        if not rows_x.any():
+            continue
+        zx = z[rows_x]
+        pool = np.sort(zx.ravel())
+        F_minus[rows_x] = np.searchsorted(pool, zx - 1e-6, side="right") / pool.size
     rows = []
     for n in ns:
         # use disjoint blocks of n samples to average over more draws
         blocks = nmax // n
-        tr, rmv, oracle = [], [], []
+        tr, rmv, oracle, lr = [], [], [], []
         for b in range(blocks):
-            zb, rb = z[:, b * n:(b + 1) * n], rt[:, b * n:(b + 1) * n]
+            sl = slice(b * n, (b + 1) * n)
+            zb, rb = z[:, sl], rt[:, sl]
             j = zb.argmax(1)
-            tr.append(rb[np.arange(n_prompts), j].mean())
-            rmv.append(zb[np.arange(n_prompts), j].mean())
+            ar = np.arange(n_prompts)
+            tr.append(rb[ar, j].mean())
+            rmv.append(zb[ar, j].mean())
             oracle.append(rb.max(1).mean())
-        rows.append(dict(n=n, kl=math.log(n) - (n - 1) / n, true=np.mean(tr), rm=np.mean(rmv),
-                         oracle=np.mean(oracle), rm_pred_true=rmn.predicted_true(np.mean(rmv))))
+            p = np.exp(logp[:, sl][ar, j])
+            Fm = F_minus[:, sl][ar, j]
+            Fp = np.minimum(1.0, Fm + p)
+            lr.append(np.mean(np.log(np.maximum(Fp**n - Fm**n, 1e-300)) - np.log(p)))
+        rows.append(dict(n=n, kl=math.log(n) - (n - 1) / n, kl_est=float(np.mean(lr)), true=np.mean(tr),
+                         rm=np.mean(rmv), oracle=np.mean(oracle),
+                         rm_pred_true=rmn.predicted_true(np.mean(rmv))))
     return rows
 
 
@@ -556,7 +596,7 @@ def main():
         report("RLOO", beta, curve, t0)
 
     # ---- Stage 3c ----
-    print("\n[Stage 3c] DPO (and IPO) on the same 2000 preference pairs, no reward model")
+    print(f"\n[Stage 3c] DPO (and IPO) on the same {len(prefs['xs'])} preference pairs, no reward model")
     for loss_type, betas in [("dpo", betas_dpo), ("ipo", [0.1])]:
         for beta in betas:
             t0 = time.time()
@@ -577,7 +617,8 @@ def main():
     for name in ["small", "large"]:
         bon[name] = best_of_n(task, ref, rms[name][1], ns, g, n_prompts=64 if quick else 512)
         for row in bon[name]:
-            print(f"  RM-{name}: n={row['n']:<4} KL<={row['kl']:.2f}  true {row['true']:+.3f}  rm {row['rm']:+.3f}"
+            print(f"  RM-{name}: n={row['n']:<4} KL<={row['kl']:.2f} (estimated exact KL {row['kl_est']:.2f})"
+                  f"  true {row['true']:+.3f}  rm {row['rm']:+.3f}"
                   f"  (RM-predicted true {row['rm_pred_true']:+.3f}; oracle best-of-n by r*: {row['oracle']:+.3f})")
     print(f"  [{time.time() - t0:.1f}s]")
 
@@ -588,6 +629,9 @@ def main():
         print(f"  {tag:<10} {beta:>6} {f['true']:>+7.3f} {f['rm']:>+7.3f} {f['kl']:>6.2f} {f['rep']:>7.2f}")
     print(f"\nTotal time {time.time() - t_start:.1f}s")
     if quick:
+        return
+    if args.seed != 0:
+        print("(figures are written only for the default seed 0; other seeds are replications)")
         return
     make_figures(results, bon, ev_ref, task)
 
@@ -608,9 +652,13 @@ def make_figures(results, bon, ev_ref, task):
             ax.plot(d, [e["true"] for e in cv], "-", color=col, lw=1.6, label=rf"PPO $\beta$={beta}: true reward")
             ax.plot(d, [e["rm_pred_true"] for e in cv], "--", color=col, lw=1.0)
         rows = bon[bkey]
-        d = np.sqrt([r["kl"] for r in rows])
-        ax.plot(d, [r["true"] for r in rows], "o-", color="tab:red", ms=3, lw=1.2, label="best-of-n: true reward")
+        # best-of-n at its estimated exact KL (filled) and at the upper bound log n - (n-1)/n (open)
+        d = np.sqrt([max(r["kl_est"], 0) for r in rows])
+        ax.plot(d, [r["true"] for r in rows], "o-", color="tab:red", ms=3, lw=1.2,
+                label="best-of-n: true reward (x = estimated exact KL)")
         ax.plot(d, [r["rm_pred_true"] for r in rows], "o--", color="tab:red", ms=3, lw=0.8)
+        ax.plot(np.sqrt([r["kl"] for r in rows]), [r["true"] for r in rows], "o", mfc="none", mec="tab:red",
+                ms=4, lw=0, label=r"best-of-n at the bound $\log n-(n-1)/n$")
         ax.plot([], [], "k--", lw=1, label="dashed: what the RM predicts")
         ax.axhline(task.best.mean(), color="0.5", lw=0.8, ls=":", label="best achievable")
         ax.set_xlabel(r"$\sqrt{\mathrm{KL}(\pi\,\Vert\,\pi_{\mathrm{ref}})}$  (nats$^{1/2}$)")

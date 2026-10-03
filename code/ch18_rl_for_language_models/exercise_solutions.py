@@ -4,7 +4,7 @@ Each function prints the numbers quoted in the corresponding solution.  The last
 (Exercises 11-13) re-use the toy RLHF pipeline of rlhf_toy.py.
 
 Run from the repository root:
-    python code/ch18_rl_for_language_models/exercise_solutions.py           # ~3 min
+    python code/ch18_rl_for_language_models/exercise_solutions.py           # ~2.5 min
     python code/ch18_rl_for_language_models/exercise_solutions.py --quick   # smoke test
 """
 from __future__ import annotations
@@ -39,13 +39,33 @@ def ex1_sequence_kl():
             pi[prefix] = softmax(rng.normal(size=V))
             ref[prefix] = softmax(rng.normal(size=V))
     kl_seq, kl_tok = 0.0, 0.0
+    probs, sampled, exact = [], [], []
     for y in itertools.product(range(V), repeat=L):
         p = np.prod([pi[y[:t]][y[t]] for t in range(L)])
         q = np.prod([ref[y[:t]][y[t]] for t in range(L)])
         kl_seq += p * math.log(p / q)
         # sum of per-position exact KLs along y, weighted by the probability of y
-        kl_tok += p * sum(np.sum(pi[y[:t]] * np.log(pi[y[:t]] / ref[y[:t]])) for t in range(L))
+        s_exact = sum(np.sum(pi[y[:t]] * np.log(pi[y[:t]] / ref[y[:t]])) for t in range(L))
+        kl_tok += p * s_exact
+        probs.append(p)
+        sampled.append(math.log(p / q))  # the k1 estimate from this one response
+        exact.append(s_exact)
     print(f"[Ex 1] sequence-level KL = {kl_seq:.6f};  E_pi[sum_t KL_t] = {kl_tok:.6f}")
+    pr, sa, ex = np.array(probs), np.array(sampled), np.array(exact)
+    var = lambda v: float(pr @ (v - pr @ v) ** 2)  # noqa: E731
+    print(f"[Ex 1] variance over y ~ pi of one response's estimate: sampled log-ratios {var(sa):.4f},"
+          f" exact per-token KLs {var(ex):.4f};  P(sampled estimate < 0) = {pr[sa < 0].sum():.3f}")
+    # A counterexample: the exact-KL sum need not have the smaller variance.  Step 1: pi = (0.5, 0.5),
+    # pi_ref = (0.25, 0.75), log-ratio l1(a).  Step 2: pi emits one token deterministically whose
+    # pi_ref-probability is exp(-(1 - l1(a))), so its log-ratio is 1 - l1(a) and its exact KL is too.
+    p1, q1 = np.array([0.5, 0.5]), np.array([0.25, 0.75])
+    l1 = np.log(p1 / q1)
+    kl1 = float(p1 @ l1)
+    s_samp = l1 + (1.0 - l1)       # identically 1
+    s_exact = kl1 + (1.0 - l1)     # KL_1 is a constant; KL_2 = log-ratio of the forced token
+    v = lambda w: float(p1 @ (w - p1 @ w) ** 2)  # noqa: E731
+    print(f"[Ex 1] counterexample: means {p1 @ s_samp:.3f} / {p1 @ s_exact:.3f};  variance of the sampled sum "
+          f"{v(s_samp):.3f}, of the exact-KL sum {v(s_exact):.3f}")
 
 
 def ex3_gumbel(n=2_000_000):
@@ -198,8 +218,10 @@ def coding_exercises(quick: bool):
                 (np.concatenate([prefs[k], new[k]]) if k != "bayes_acc" else prefs[k])) for k in prefs}
     rm2, _ = R.train_reward_model(task, both, val, 3 if quick else 12, g)
     rmn2 = R.NormalizedRM(rm2, task, ref, g)
-    for x, zs, ts in R.probe_repeats(task, rmn2)[:2]:
-        print(f"  RM-2, prompt {x}, best word repeated 1,2,3,5,9 times: " + " ".join(f"{z:+.2f}" for z in zs))
+    # the repeat probe (deterministic: draws no random numbers) for RM-1 and RM-2, all prompts
+    for (x, z1, ts), (_, z2, _) in zip(R.probe_repeats(task, rmn), R.probe_repeats(task, rmn2)):
+        print(f"  prompt {x}, best word repeated 1,2,3,5,9 times:  RM-1 " + " ".join(f"{z:+.2f}" for z in z1)
+              + "   RM-2 " + " ".join(f"{z:+.2f}" for z in z2) + "   r* " + " ".join(f"{t:+.2f}" for t in ts))
     R.seed_all(SEED + 4)
     _, c2 = R.run_ppo(task, ref, rmn2, rm2, 0.01, iters, g, cfg, eval_every=iters)
     show("round 2: PPO beta=0.01, RM-2", c2[-1])

@@ -11,24 +11,33 @@ a program, like a maths answer checker or a unit test:
       outcome reward  r(x, y) = 1  if y ends with EOS and its last digit = (d_1+...+d_n) mod 10
                                 0  otherwise.
 
-The base model is trained by maximum likelihood on *noisy* demonstrations: each step slips by
-+-1 with probability 0.1 and the slip propagates (like an arithmetic error in a derivation).
-The base model therefore "knows how" to solve every problem but is unreliable, and longer
-problems are harder -- the situation of a pretrained LLM before RLVR.
+The base model is trained by maximum likelihood on *noisy* demonstrations with two kinds of
+error (see demos()): a systematic "carry bug" (when a running sum exceeds 9 the demonstrator
+writes the units digit plus one with probability P_WRAP = 0.6) and random +-1 slips (probability
+P_SLIP = 0.05 on the other steps).  Errors propagate to later steps, like an arithmetic error in
+a derivation.  The base model can produce correct solutions but is unreliable, its most likely
+digit at a carry step is the wrong one, and longer problems are harder -- the situation of a
+pretrained LLM before RLVR.
 
 What runs (all variants share one update routine; only the knobs differ, Algorithm 18.7):
-  REINFORCE   advantage = r                       (no baseline)
-  RLOO        advantage = r_i - mean_{j!=i} r_j   (leave-one-out baseline)
+  REINFORCE   advantage = r                       (no baseline), no clip, no KL
+  RLOO        advantage = r_i - mean_{j!=i} r_j   (leave-one-out baseline), no clip, no KL
+              (both take several minibatch steps per batch with an unclipped per-token ratio, so
+              after the first step they optimise a biased off-policy surrogate, not REINFORCE proper)
   GRPO        advantage = (r_i - mean) / std      per-response 1/|o_i| averaging, clip 0.2, KL 0.04 (k3)
-  Dr. GRPO    advantage = r_i - mean              token sum / constant, otherwise as GRPO
+  Dr. GRPO    advantage = r_i - mean              token sum / constant, clip 0.2, no KL (eq. 18.28)
   DAPO-lite   advantage = (r_i - mean) / std      token-level averaging, clip-higher (0.2, 0.28),
                                                   dynamic sampling (drop all-0 / all-1 groups), no KL
   GRPO+PRM    process rewards: each step is checked locally (is s_k = s_{k-1} + d_k mod 10?);
               advantages are DeepSeekMath's process-supervision advantages (Section 11)
+  Two ablations that separate the KL term from the normalisations:
+  GRPO, beta=0          GRPO without its KL term (the fair partner of Dr. GRPO)
+  Dr. GRPO, beta=0.04   Dr. GRPO with GRPO's KL term.  Without std normalisation its advantages
+                        are 2-3x smaller, so the same beta regularises it relatively more.
 Then: pass@k and majority-vote accuracy (test-time compute) for the base and trained models.
 
 Run from the repository root:
-    python code/ch18_rl_for_language_models/grpo_rlvr.py            # full run with figures
+    python code/ch18_rl_for_language_models/grpo_rlvr.py            # full run with figures (~6 min)
     python code/ch18_rl_for_language_models/grpo_rlvr.py --quick    # smoke test, no figures
 """
 from __future__ import annotations
@@ -203,10 +212,13 @@ METHODS = {
     "REINFORCE": dict(adv="none", norm="seq_sum", clip=None, beta=0.0, dyn=False),
     "RLOO":      dict(adv="rloo", norm="seq_sum", clip=None, beta=0.0, dyn=False),
     "GRPO":      dict(adv="grpo", norm="seq_mean", clip=(0.2, 0.2), beta=0.04, dyn=False),
-    "Dr. GRPO":  dict(adv="mean", norm="const", clip=(0.2, 0.2), beta=0.04, dyn=False),
+    "GRPO, beta=0": dict(adv="grpo", norm="seq_mean", clip=(0.2, 0.2), beta=0.0, dyn=False),
+    "Dr. GRPO":  dict(adv="mean", norm="const", clip=(0.2, 0.2), beta=0.0, dyn=False),
+    "Dr. GRPO, beta=0.04": dict(adv="mean", norm="const", clip=(0.2, 0.2), beta=0.04, dyn=False),
     "DAPO-lite": dict(adv="grpo", norm="token", clip=(0.2, 0.28), beta=0.0, dyn=True),
     "GRPO+PRM":  dict(adv="process", norm="seq_mean", clip=(0.2, 0.2), beta=0.04, dyn=False),
 }
+ABLATIONS = {"GRPO, beta=0", "Dr. GRPO, beta=0.04"}  # drawn dashed in the figure
 
 
 def aggregate(per_token, mask, norm, G):
@@ -299,7 +311,9 @@ def run_rl(name, base, iters, g, cfg, eval_set, log_every=0):
                 logp = token_logprobs(policy, ci, yi, mi)
                 ratio = torch.exp(logp - logp_old[idx])
                 if knobs["clip"] is None:
-                    # plain policy gradient; ratio = 1 on the first pass, so this is REINFORCE
+                    # unclipped policy gradient.  On the first minibatch step ratio = 1 and this is
+                    # REINFORCE.  On later steps the per-token ratio drops the product of the
+                    # prefix ratios, so it is a (biased) off-policy surrogate, not REINFORCE proper.
                     surr = ratio * ai
                 else:
                     lo, hi = knobs["clip"]
@@ -307,7 +321,8 @@ def run_rl(name, base, iters, g, cfg, eval_set, log_every=0):
                 per_tok = -surr
                 if knobs["beta"] > 0:
                     # k3 estimator of KL(pi || pi_ref) per token, as in GRPO (eq. 18.27):
-                    # pi_ref/pi - log(pi_ref/pi) - 1  >= 0, unbiased under y ~ pi
+                    # pi_ref/pi - log(pi_ref/pi) - 1  >= 0.  It is unbiased when y ~ pi_theta;
+                    # here y ~ pi_old, so it is exact only on the first minibatch step.
                     with torch.no_grad():
                         logp_ref = token_logprobs(base, ci, yi, mi)
                     log_rr = logp_ref - logp
@@ -323,7 +338,7 @@ def run_rl(name, base, iters, g, cfg, eval_set, log_every=0):
             ev.update(it=it, samples=n_samples, degenerate=float(np.mean(degen_hist[-cfg["eval_every"]:])))
             curve.append(ev)
             if log_every and (it % log_every == 0 or it == iters - 1):
-                print(f"    {name:<9} it {it:4d}  acc {ev['acc']:.3f}  greedy {ev['greedy']:.3f}  "
+                print(f"    {name:<19} it {it:4d}  acc {ev['acc']:.3f}  greedy {ev['greedy']:.3f}  "
                       f"chain-ok|correct {ev['chain_given_correct']:.3f}  KL {ev['kl']:.2f}  "
                       f"entropy {ev['entropy']:.3f}  degenerate groups {frac_degenerate:.2f}")
     return policy, curve
@@ -448,7 +463,7 @@ def main():
             if s == 0:
                 finals[mname] = pol
             f = curve[-1]
-            print(f"  {mname:<9} seed {s}: acc {f['acc']:.3f}  greedy {f['greedy']:.3f}  by size "
+            print(f"  {mname:<19} seed {s}: acc {f['acc']:.3f}  greedy {f['greedy']:.3f}  by size "
                   + " ".join(f"{f[f'acc_n{n}']:.2f}" for n in range(N_MIN, N_MAX + 1))
                   + f"  KL {f['kl']:.2f}  entropy {f['entropy']:.3f}  chain-ok|correct "
                     f"{f['chain_given_correct']:.3f}  samples {f['samples']}  [{time.time() - t0:.1f}s]")
@@ -467,16 +482,16 @@ def main():
     print(f"  [{time.time() - t0:.1f}s]")
 
     print("\nSummary (final iterate, mean over seeds of sampled accuracy at temperature 1)")
-    print(f"  {'method':<10} {'acc':>6} {'(min-max)':>12} {'greedy':>7} {'n=6 acc':>8} {'KL':>6} {'entropy':>8}"
+    print(f"  {'method':<19} {'acc':>6} {'(min-max)':>12} {'greedy':>7} {'n=6 acc':>8} {'KL':>6} {'entropy':>8}"
           f" {'chain ok':>9} {'no-signal':>10} {'samples':>8}")
-    print(f"  {'base':<10} {ev0['acc']:>6.3f} {'':>12} {ev0['greedy']:>7.3f} {ev0['acc_n6']:>8.3f} {0.0:>6.2f} "
+    print(f"  {'base':<19} {ev0['acc']:>6.3f} {'':>12} {ev0['greedy']:>7.3f} {ev0['acc_n6']:>8.3f} {0.0:>6.2f} "
           f"{ev0['entropy']:>8.3f} {ev0['chain_given_correct']:>9.3f} {'':>10} {0:>8}")
     for mname in methods:
         fs = [c[-1] for c in curves[mname]]
         accs = [f['acc'] for f in fs]
         # 'no-signal': fraction of groups that were all-correct or all-wrong over the last
         # eval_every iterations (before DAPO's filtering)
-        print(f"  {mname:<10} {np.mean(accs):>6.3f} {f'({min(accs):.3f}-{max(accs):.3f})':>12}"
+        print(f"  {mname:<19} {np.mean(accs):>6.3f} {f'({min(accs):.3f}-{max(accs):.3f})':>12}"
               f" {np.mean([f['greedy'] for f in fs]):>7.3f}"
               f" {np.mean([f['acc_n6'] for f in fs]):>8.3f} {np.mean([f['kl'] for f in fs]):>6.2f}"
               f" {np.mean([f['entropy'] for f in fs]):>8.3f} {np.mean([f['chain_given_correct'] for f in fs]):>9.3f}"
@@ -496,18 +511,20 @@ def main():
 
 def make_figures(curves, tts, ev0, ks):
     os.makedirs(FIG_DIR, exist_ok=True)
-    colors = dict(zip(METHODS, ["0.5", "tab:brown", "tab:blue", "tab:orange", "tab:green", "tab:purple"]))
+    colors = dict(zip(METHODS, ["0.5", "tab:brown", "tab:blue", "tab:blue", "tab:orange", "tab:orange",
+                                "tab:green", "tab:purple"]))
     fig, axes = plt.subplots(1, 4, figsize=(17, 4))
     for mname, cl in curves.items():
         # x axis: responses sampled so far (DAPO's dynamic sampling draws extra groups)
         xs = np.array([[e["samples"] for e in c] for c in cl]).mean(0) / 1000.0
+        ls = "--" if mname in ABLATIONS else "-"
         for ax, key in zip(axes[:3], ["acc", "kl", "entropy"]):
             vals = np.array([[e[key] for e in c] for c in cl])
-            ax.plot(xs, vals.mean(0), color=colors[mname], label=mname)
-            if len(cl) > 1:
+            ax.plot(xs, vals.mean(0), ls, color=colors[mname], label=mname)
+            if len(cl) > 1 and mname not in ABLATIONS:
                 ax.fill_between(xs, vals.min(0), vals.max(0), color=colors[mname], alpha=0.15)
         vals = np.array([[e["degenerate"] for e in c] for c in cl])
-        axes[3].plot(xs, vals.mean(0), color=colors[mname], label=mname)
+        axes[3].plot(xs, vals.mean(0), ls, color=colors[mname], label=mname)
     axes[0].axhline(ev0["acc"], color="k", ls=":", lw=1, label="base")
     for ax, yl, t in zip(axes, ["accuracy (sampled, T=1)", r"KL$(\pi_\theta\,\Vert\,\pi_{\mathrm{ref}})$",
                                  "token entropy (nats)", "fraction of groups with no signal"],
@@ -525,7 +542,7 @@ def make_figures(curves, tts, ev0, ks):
     fig, axes = plt.subplots(1, 2, figsize=(11, 4))
     sizes = list(range(N_MIN, N_MAX + 1))
     x = np.arange(len(sizes))
-    names = ["base"] + list(curves)
+    names = ["base"] + [mname for mname in curves if mname not in ABLATIONS]
     w = 0.8 / len(names)
     for j, mname in enumerate(names):
         if mname == "base":
